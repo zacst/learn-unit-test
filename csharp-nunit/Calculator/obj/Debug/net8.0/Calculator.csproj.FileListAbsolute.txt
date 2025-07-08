@@ -1,0 +1,11 @@
+/home/bebas/unit-testing/csharp-nunit/Calculator/bin/Debug/net8.0/Calculator.deps.json
+/home/bebas/unit-testing/csharp-nunit/Calculator/bin/Debug/net8.0/Calculator.dll
+/home/bebas/unit-testing/csharp-nunit/Calculator/bin/Debug/net8.0/Calculator.pdb
+/home/bebas/unit-testing/csharp-nunit/Calculator/obj/Debug/net8.0/Calculator.GeneratedMSBuildEditorConfig.editorconfig
+/home/bebas/unit-testing/csharp-nunit/Calculator/obj/Debug/net8.0/Calculator.AssemblyInfoInputs.cache
+/home/bebas/unit-testing/csharp-nunit/Calculator/obj/Debug/net8.0/Calculator.AssemblyInfo.cs
+/home/bebas/unit-testing/csharp-nunit/Calculator/obj/Debug/net8.0/Calculator.csproj.CoreCompileInputs.cache
+/home/bebas/unit-testing/csharp-nunit/Calculator/obj/Debug/net8.0/Calculator.dll
+/home/bebas/unit-testing/csharp-nunit/Calculator/obj/Debug/net8.0/refint/Calculator.dll
+/home/bebas/unit-testing/csharp-nunit/Calculator/obj/Debug/net8.0/Calculator.pdb
+/home/bebas/unit-testing/csharp-nunit/Calculator/obj/Debug/net8.0/ref/Calculator.dll

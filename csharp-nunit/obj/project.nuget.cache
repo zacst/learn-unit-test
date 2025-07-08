@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "1vzNtVVnjrs=",
+  "success": true,
+  "projectFilePath": "/home/bebas/unit-testing/csharp-nunit/csharp-nunit.csproj",
+  "expectedPackageFiles": [
+    "/home/bebas/.nuget/packages/castle.core/5.1.1/castle.core.5.1.1.nupkg.sha512",
+    "/home/bebas/.nuget/packages/moq/4.20.72/moq.4.20.72.nupkg.sha512",
+    "/home/bebas/.nuget/packages/system.diagnostics.eventlog/6.0.0/system.diagnostics.eventlog.6.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}
