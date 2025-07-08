@@ -15,9 +15,9 @@ pipeline {
         TEST_RESULTS_DIR = 'test-results'
         COVERAGE_REPORTS_DIR = 'coverage-reports'
         
-        // Notification Configuration
-        SLACK_CHANNEL = '#ci-cd' // Optional: Configure for Slack notifications
-        EMAIL_RECIPIENTS = 'team@company.com' // Optional: Configure for email notifications
+        // // Notification Configuration
+        // SLACK_CHANNEL = '#ci-cd' // Optional: Configure for Slack notifications
+        // EMAIL_RECIPIENTS = 'team@company.com' // Optional: Configure for email notifications
     }
     
     options {
@@ -303,7 +303,7 @@ pipeline {
                         always {
                             script {
                                 if (fileExists("${TEST_RESULTS_DIR}/nunit-results.trx")) {
-                                    publishTestResults testResultsPattern: "${TEST_RESULTS_DIR}/nunit-results.trx"
+                                    mstest testResultsFile: "${TEST_RESULTS_DIR}/nunit-results.trx"
                                 }
                             }
                         }
@@ -349,7 +349,7 @@ pipeline {
                         always {
                             script {
                                 if (fileExists("${TEST_RESULTS_DIR}/xunit-results.trx")) {
-                                    publishTestResults testResultsPattern: "${TEST_RESULTS_DIR}/xunit-results.trx"
+                                    mstest testResultsFile: "${TEST_RESULTS_DIR}/xunit-results.trx"
                                 }
                             }
                         }
@@ -403,7 +403,7 @@ pipeline {
                                 ).trim()
                                 
                                 if (junitResults) {
-                                    publishTestResults testResultsPattern: "**/TEST-*.xml,**/junit-*.xml"
+                                    junit testResultsPattern: "**/TEST-*.xml,**/junit-*.xml"
                                 }
                             }
                         }
@@ -565,17 +565,14 @@ pipeline {
     
     post {
         always {
-            // Fix: Wrap sh commands in node block for post actions
-            node {
-                script {
-                    echo "🧹 Post-build cleanup..."
-                    
-                    // Clean up temporary files
-                    sh """
-                        find . -name '*.tmp' -delete || true
-                        find . -name 'TestResults' -type d -exec rm -rf {} + || true
-                    """
-                }
+            script {
+                echo "🧹 Post-build cleanup..."
+                
+                // Clean up temporary files
+                sh """
+                    find . -name '*.tmp' -delete || true
+                    find . -name 'TestResults' -type d -exec rm -rf {} + || true
+                """
             }
         }
         
