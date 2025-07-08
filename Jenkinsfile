@@ -565,14 +565,17 @@ pipeline {
     
     post {
         always {
-            script {
-                echo "🧹 Post-build cleanup..."
-                
-                // Clean up temporary files
-                sh """
-                    find . -name '*.tmp' -delete || true
-                    find . -name 'TestResults' -type d -exec rm -rf {} + || true
-                """
+            // Fix: Wrap sh commands in node block for post actions
+            node {
+                script {
+                    echo "🧹 Post-build cleanup..."
+                    
+                    // Clean up temporary files
+                    sh """
+                        find . -name '*.tmp' -delete || true
+                        find . -name 'TestResults' -type d -exec rm -rf {} + || true
+                    """
+                }
             }
         }
         
