@@ -150,6 +150,25 @@ pipeline {
                     steps {
                         script {
                             echo "📦 Restoring .NET dependencies..."
+
+                            def dotnetVerbosity
+                            switch (params.LOG_LEVEL) {
+                                case 'INFO':
+                                    dotnetVerbosity = 'n' // 'normal'
+                                    break
+                                case 'DEBUG':
+                                    dotnetVerbosity = 'd' // 'detailed'
+                                    break
+                                case 'WARN':
+                                    dotnetVerbosity = 'm' // 'minimal' (closest for warn)
+                                    break
+                                case 'ERROR':
+                                    dotnetVerbosity = 'q' // 'quiet' (closest for error)
+                                    break
+                                default:
+                                    dotnetVerbosity = 'n' // Default to normal
+                                    break
+                            }
                             
                             // Find all .NET project files
                             def dotnetProjects = sh(
@@ -159,7 +178,7 @@ pipeline {
                             
                             if (dotnetProjects) {
                                 sh """
-                                    dotnet restore --verbosity ${params.LOG_LEVEL.toLowerCase()}
+                                    dotnet restore --verbosity ${dotnetverbosity}
                                 """
                             } else {
                                 echo "⚠️  No .NET project files found, skipping restore"
