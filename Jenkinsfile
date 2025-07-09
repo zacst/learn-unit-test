@@ -11,7 +11,7 @@ pipeline {
         TEST_RESULTS_DIR = 'test-results'
         COVERAGE_REPORTS_DIR = 'coverage-reports'
         // JUnit Test Results Configuration
-        JUNIT_TEST_RESULTS_DIR = 'java-junit/target/surefire-reports' // Added for JUnit
+        JUNIT_TEST_RESULTS_DIR = 'java-junit/target/surefire-reports'
         
         // // Notification Configuration
         // SLACK_CHANNEL = '#ci-cd' // Optional: Configure for Slack notifications
@@ -44,7 +44,7 @@ pipeline {
         )
         choice(
             name: 'TEST_FRAMEWORK',
-            choices: ['AUTO', 'NUNIT', 'XUNIT', 'BOTH', 'JUNIT'], // Added JUNIT
+            choices: ['AUTO', 'NUNIT', 'XUNIT', 'BOTH', 'JUNIT'],
             description: 'Choose test framework to run (AUTO detects automatically)'
         )
     }
@@ -71,6 +71,10 @@ pipeline {
                     }
                     echo "🔧 dotnetVerbosity set to: ${dotnetVerbosity}"
                     echo "🧪 Test framework selection: ${params.TEST_FRAMEWORK}"
+                    
+                    // Initialize project arrays globally
+                    env.nunitProjects = ''
+                    env.xunitProjects = ''
                 }
             }
         }
@@ -159,8 +163,8 @@ pipeline {
                     ).trim().split('\n').findAll { it.trim() }
                     
                     // Initialize as proper lists
-                    nunitProjects = []
-                    xunitProjects = []
+                    def nunitProjectsList = []
+                    def xunitProjectsList = []
                     
                     if (allTestProjects && allTestProjects[0]) {
                         echo "📁 Found ${allTestProjects.size()} potential test project(s)"
@@ -171,9 +175,9 @@ pipeline {
                                 echo "    📋 ${project} -> ${framework}"
                                 
                                 if (framework == 'NUNIT') {
-                                    nunitProjects.add(project)
+                                    nunitProjectsList.add(project)
                                 } else if (framework == 'XUNIT') {
-                                    xunitProjects.add(project)
+                                    xunitProjectsList.add(project)
                                 }
                             }
                         }
@@ -181,22 +185,26 @@ pipeline {
                     
                     // Override with hardcoded projects if AUTO detection fails or specific framework is selected
                     if (params.TEST_FRAMEWORK == 'NUNIT' || 
-                        (params.TEST_FRAMEWORK == 'AUTO' && nunitProjects.isEmpty() && xunitProjects.isEmpty())) {
+                        (params.TEST_FRAMEWORK == 'AUTO' && nunitProjectsList.isEmpty() && xunitProjectsList.isEmpty())) {
                         echo "📋 Using hardcoded NUnit projects"
-                        nunitProjects = ['./csharp-nunit/Calculator.Tests/Calculator.Tests.csproj']
+                        nunitProjectsList = ['./csharp-nunit/Calculator.Tests/Calculator.Tests.csproj']
                     }
                     
                     if (params.TEST_FRAMEWORK == 'XUNIT' || params.TEST_FRAMEWORK == 'BOTH') {
                         echo "📋 Adding XUnit projects (add your XUnit project paths here)"
                         // Add your XUnit project paths here:
-                        // xunitProjects.add('./csharp-xunit/Calculator.Tests/Calculator.Tests.csproj')
+                        // xunitProjectsList.add('./csharp-xunit/Calculator.Tests/Calculator.Tests.csproj')
                     }
                     
+                    // Store in environment variables for use in other stages
+                    env.nunitProjects = nunitProjectsList.join(',')
+                    env.xunitProjects = xunitProjectsList.join(',')
+                    
                     echo "📊 Test Projects Summary:"
-                    echo "    NUnit Projects: ${nunitProjects.size()}"
-                    nunitProjects.each { echo "      - ${it}" }
-                    echo "    XUnit Projects: ${xunitProjects.size()}"
-                    xunitProjects.each { echo "      - ${it}" }
+                    echo "    NUnit Projects: ${nunitProjectsList.size()}"
+                    nunitProjectsList.each { echo "      - ${it}" }
+                    echo "    XUnit Projects: ${xunitProjectsList.size()}"
+                    xunitProjectsList.each { echo "      - ${it}" }
                 }
             }
         }
@@ -283,33 +291,39 @@ pipeline {
                 stage('Run NUnit Tests') {
                     when {
                         expression { 
-                            return nunitProjects && nunitProjects.size() > 0 &&
-                                    (params.TEST_FRAMEWORK == 'AUTO' || params.TEST_FRAMEWORK == 'NUNIT' || params.TEST_FRAMEWORK == 'BOTH')
+                            return params.TEST_FRAMEWORK != 'JUNIT' && 
+                                   env.nunitProjects && env.nunitProjects.trim() != '' &&
+                                   (params.TEST_FRAMEWORK == 'AUTO' || params.TEST_FRAMEWORK == 'NUNIT' || params.TEST_FRAMEWORK == 'BOTH')
                         }
                     }
                     steps {
                         script {
                             echo "🧪 Running NUnit tests..."
                             
-                            if (nunitProjects && nunitProjects.size() > 0) {
-                                echo "🧪 Running ${nunitProjects.size()} NUnit test project(s)"
+                            def nunitProjectsList = env.nunitProjects.split(',').findAll { it.trim() }
+                            
+                            if (nunitProjectsList && nunitProjectsList.size() > 0) {
+                                echo "🧪 Running ${nunitProjectsList.size()} NUnit test project(s)"
 
                                 def coverageArg = params.GENERATE_COVERAGE 
                                     ? '--collect:"XPlat Code Coverage"' 
                                     : ""
 
-                                nunitProjects.each { project ->
-                                    echo "🧪 Running NUnit tests in: ${project}"
-                                    def projectName = project.split('/')[-1].replace('.csproj', '')
-                                    sh """
-                                        dotnet test '${project}' \\
-                                            --configuration Release \\
-                                            --no-build \\
-                                            --logger "trx;LogFileName=nunit-results-${projectName}.trx" \\
-                                            --results-directory ${TEST_RESULTS_DIR} \\
-                                            ${coverageArg} \\
-                                            --verbosity ${dotnetVerbosity}
-                                    """
+                                nunitProjectsList.each { project ->
+                                    project = project.trim()
+                                    if (project) {
+                                        echo "🧪 Running NUnit tests in: ${project}"
+                                        def projectName = project.split('/')[-1].replace('.csproj', '')
+                                        sh """
+                                            dotnet test '${project}' \\
+                                                --configuration Release \\
+                                                --no-build \\
+                                                --logger "trx;LogFileName=nunit-results-${projectName}.trx" \\
+                                                --results-directory ${TEST_RESULTS_DIR} \\
+                                                ${coverageArg} \\
+                                                --verbosity ${dotnetVerbosity}
+                                        """
+                                    }
                                 }
                             } else {
                                 echo "⚠️  No NUnit test projects found"
@@ -321,33 +335,39 @@ pipeline {
                 stage('Run XUnit Tests') {
                     when {
                         expression { 
-                            return xunitProjects && xunitProjects.size() > 0 &&
-                                    (params.TEST_FRAMEWORK == 'AUTO' || params.TEST_FRAMEWORK == 'XUNIT' || params.TEST_FRAMEWORK == 'BOTH')
+                            return params.TEST_FRAMEWORK != 'JUNIT' && 
+                                   env.xunitProjects && env.xunitProjects.trim() != '' &&
+                                   (params.TEST_FRAMEWORK == 'AUTO' || params.TEST_FRAMEWORK == 'XUNIT' || params.TEST_FRAMEWORK == 'BOTH')
                         }
                     }
                     steps {
                         script {
                             echo "🧪 Running XUnit tests..."
                             
-                            if (xunitProjects && xunitProjects.size() > 0) {
-                                echo "🧪 Running ${xunitProjects.size()} XUnit test project(s)"
+                            def xunitProjectsList = env.xunitProjects.split(',').findAll { it.trim() }
+                            
+                            if (xunitProjectsList && xunitProjectsList.size() > 0) {
+                                echo "🧪 Running ${xunitProjectsList.size()} XUnit test project(s)"
 
                                 def coverageArg = params.GENERATE_COVERAGE 
                                     ? '--collect:"XPlat Code Coverage"' 
                                     : ""
 
-                                xunitProjects.each { project ->
-                                    echo "🧪 Running XUnit tests in: ${project}"
-                                    def projectName = project.split('/')[-1].replace('.csproj', '')
-                                    sh """
-                                        dotnet test '${project}' \\
-                                            --configuration Release \\
-                                            --no-build \\
-                                            --logger "trx;LogFileName=xunit-results-${projectName}.trx" \\
-                                            --results-directory ${TEST_RESULTS_DIR} \\
-                                            ${coverageArg} \\
-                                            --verbosity ${dotnetVerbosity}
-                                    """
+                                xunitProjectsList.each { project ->
+                                    project = project.trim()
+                                    if (project) {
+                                        echo "🧪 Running XUnit tests in: ${project}"
+                                        def projectName = project.split('/')[-1].replace('.csproj', '')
+                                        sh """
+                                            dotnet test '${project}' \\
+                                                --configuration Release \\
+                                                --no-build \\
+                                                --logger "trx;LogFileName=xunit-results-${projectName}.trx" \\
+                                                --results-directory ${TEST_RESULTS_DIR} \\
+                                                ${coverageArg} \\
+                                                --verbosity ${dotnetVerbosity}
+                                        """
+                                    }
                                 }
                             } else {
                                 echo "⚠️  No XUnit test projects found"
@@ -365,9 +385,20 @@ pipeline {
                     steps {
                         script {
                             echo "🧪 Running JUnit tests (Maven Surefire)..."
-                            // Assuming your JUnit tests are part of a Maven project
-                            // and the reports are generated in target/surefire-reports/
-                            sh "mvn test"
+                            
+                            // Create the junit test results directory
+                            sh "mkdir -p ${JUNIT_TEST_RESULTS_DIR}"
+                            
+                            // Change to the Java project directory if it exists
+                            if (fileExists('java-junit')) {
+                                dir('java-junit') {
+                                    sh "mvn test"
+                                }
+                            } else {
+                                // Run from root directory if no specific java directory
+                                sh "mvn test"
+                            }
+                            
                             echo "✅ JUnit tests execution completed."
                         }
                     }
@@ -376,25 +407,48 @@ pipeline {
             post {
                 always {
                     script {
-                        // Find all matching TRX files
-                        def trxFiles = sh(
-                            script: "find ${TEST_RESULTS_DIR} -type f -name '*-results*.trx' || true",
-                            returnStdout: true
-                        ).trim()
+                        // Find all matching TRX files for .NET tests
+                        if (params.TEST_FRAMEWORK != 'JUNIT') {
+                            def trxFiles = sh(
+                                script: "find ${TEST_RESULTS_DIR} -type f -name '*-results*.trx' 2>/dev/null || true",
+                                returnStdout: true
+                            ).trim()
 
-                        if (trxFiles) {
-                            echo "📊 Found test result files:"
-                            trxFiles.split('\n').each { file ->
-                                echo "    - ${file}"
+                            if (trxFiles) {
+                                echo "📊 Found test result files:"
+                                trxFiles.split('\n').each { file ->
+                                    if (file.trim()) {
+                                        echo "    - ${file}"
+                                    }
+                                }
+                                
+                                // Archive them as artifacts
+                                archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/*-results*.trx", allowEmptyArchive: true
+                            } else {
+                                echo '⚠️  No .NET test result files found.'
                             }
-                            
-                            // Archive them as artifacts
-                            archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/*-results*.trx", allowEmptyArchive: true
+                        }
+                        
+                        // Archive JUnit test results
+                        if (params.TEST_FRAMEWORK == 'JUNIT') {
+                            def junitFiles = sh(
+                                script: "find ${JUNIT_TEST_RESULTS_DIR} -type f -name 'TEST-*.xml' 2>/dev/null || true",
+                                returnStdout: true
+                            ).trim()
 
-                            // Optional: Convert TRX to JUnit format and publish if needed
-                            // publishTestResults adapters: [[$class: 'MSTestResultsTestDataPublisher', testResultsFile: "${TEST_RESULTS_DIR}/*.trx"]]
-                        } else {
-                            echo '⚠️  No .NET test result files found.'
+                            if (junitFiles) {
+                                echo "📊 Found JUnit test result files:"
+                                junitFiles.split('\n').each { file ->
+                                    if (file.trim()) {
+                                        echo "    - ${file}"
+                                    }
+                                }
+                                
+                                // Archive them as artifacts
+                                archiveArtifacts artifacts: "${JUNIT_TEST_RESULTS_DIR}/TEST-*.xml", allowEmptyArchive: true
+                            } else {
+                                echo '⚠️  No JUnit test result files found.'
+                            }
                         }
                     }
                 }
@@ -403,7 +457,10 @@ pipeline {
         
         stage('Generate Coverage Report') {
             when {
-                equals expected: true, actual: params.GENERATE_COVERAGE
+                allOf {
+                    equals expected: true, actual: params.GENERATE_COVERAGE
+                    not { equals expected: 'JUNIT', actual: params.TEST_FRAMEWORK }
+                }
             }
             steps {
                 script {
@@ -411,14 +468,16 @@ pipeline {
                     
                     // Find all coverage files recursively
                     def coverageFiles = sh(
-                        script: "find . -type f -name 'coverage.cobertura.xml'",
+                        script: "find . -type f -name 'coverage.cobertura.xml' 2>/dev/null || true",
                         returnStdout: true
                     ).trim()
                     
                     if (coverageFiles) {
                         echo "📊 Found coverage files:"
                         coverageFiles.split('\n').each { file ->
-                            echo "    - ${file}"
+                            if (file.trim()) {
+                                echo "    - ${file}"
+                            }
                         }
                         
                         sh """
@@ -466,18 +525,31 @@ pipeline {
                     }
 
                     // Publish JUnit test results
-                    if (params.TEST_FRAMEWORK == 'JUNIT' || (params.TEST_FRAMEWORK == 'AUTO' && fileExists("${JUNIT_TEST_RESULTS_DIR}/TEST-*.xml"))) {
+                    if (params.TEST_FRAMEWORK == 'JUNIT') {
                         echo "📊 Publishing JUnit test results from: ${JUNIT_TEST_RESULTS_DIR}/*.xml"
                         try {
-                            junit "${JUNIT_TEST_RESULTS_DIR}/TEST-*.xml"
-                            echo "✅ JUnit test reports published successfully"
+                            if (fileExists("${JUNIT_TEST_RESULTS_DIR}")) {
+                                def junitFiles = sh(
+                                    script: "find ${JUNIT_TEST_RESULTS_DIR} -name 'TEST-*.xml' -type f 2>/dev/null || true",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (junitFiles) {
+                                    junit "${JUNIT_TEST_RESULTS_DIR}/TEST-*.xml"
+                                    echo "✅ JUnit test reports published successfully"
+                                } else {
+                                    echo "⚠️  No JUnit test result files found to publish"
+                                }
+                            } else {
+                                echo "⚠️  JUnit test results directory not found: ${JUNIT_TEST_RESULTS_DIR}"
+                            }
                         } catch (Exception e) {
                             echo "⚠️  Warning: Could not publish JUnit test reports: ${e.getMessage()}"
                         }
                     }
                     
                     // Publish coverage reports
-                    if (params.GENERATE_COVERAGE && params.TEST_FRAMEWORK != 'JUNIT') { // Only for .NET coverage
+                    if (params.GENERATE_COVERAGE && params.TEST_FRAMEWORK != 'JUNIT') {
                         // .NET Coverage
                         def coberturaFile = "${COVERAGE_REPORTS_DIR}/dotnet/Cobertura.xml"
                         if (fileExists(coberturaFile)) {
@@ -497,7 +569,7 @@ pipeline {
                     
                     // Archive artifacts
                     try {
-                        archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/**,${COVERAGE_REPORTS_DIR}/**,${JUNIT_TEST_RESULTS_DIR}/**", // Updated for JUnit
+                        archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/**,${COVERAGE_REPORTS_DIR}/**,${JUNIT_TEST_RESULTS_DIR}/**",
                             allowEmptyArchive: true,
                             fingerprint: true
                         echo "✅ Artifacts archived successfully"
@@ -524,8 +596,13 @@ pipeline {
                     echo "    Build Number: ${env.BUILD_NUMBER}"
                     echo "    Branch: ${env.BRANCH_NAME}"
                     echo "    Test Framework: ${params.TEST_FRAMEWORK}"
-                    echo "    NUnit Projects: ${nunitProjects?.size() ?: 0}"
-                    echo "    XUnit Projects: ${xunitProjects?.size() ?: 0}"
+                    
+                    // Get project counts safely
+                    def nunitCount = (env.nunitProjects && env.nunitProjects.trim() != '') ? env.nunitProjects.split(',').size() : 0
+                    def xunitCount = (env.xunitProjects && env.xunitProjects.trim() != '') ? env.xunitProjects.split(',').size() : 0
+                    
+                    echo "    NUnit Projects: ${nunitCount}"
+                    echo "    XUnit Projects: ${xunitCount}"
                     
                     // Quality gate criteria based on build status
                     if (buildStatus == 'FAILURE') {
@@ -544,7 +621,7 @@ pipeline {
                             
                             // Check for specific test result files
                             def trxFiles = sh(
-                                script: "find ${TEST_RESULTS_DIR} -name '*.trx' -type f | wc -l",
+                                script: "find ${TEST_RESULTS_DIR} -name '*.trx' -type f 2>/dev/null | wc -l || echo 0",
                                 returnStdout: true
                             ).trim() as Integer
                             
@@ -559,12 +636,12 @@ pipeline {
                     }
 
                     // Check for JUnit test results files
-                    if (params.TEST_FRAMEWORK == 'JUNIT' || (params.TEST_FRAMEWORK == 'AUTO' && fileExists("${JUNIT_TEST_RESULTS_DIR}/TEST-*.xml"))) {
+                    if (params.TEST_FRAMEWORK == 'JUNIT') {
                         def junitResultsExist = fileExists("${JUNIT_TEST_RESULTS_DIR}")
                         if (junitResultsExist) {
                             echo "✅ JUnit test results directory found: ${JUNIT_TEST_RESULTS_DIR}"
                             def junitXmlFiles = sh(
-                                script: "find ${JUNIT_TEST_RESULTS_DIR} -name 'TEST-*.xml' -type f | wc -l",
+                                script: "find ${JUNIT_TEST_RESULTS_DIR} -name 'TEST-*.xml' -type f 2>/dev/null | wc -l || echo 0",
                                 returnStdout: true
                             ).trim() as Integer
                             if (junitXmlFiles > 0) {
@@ -610,7 +687,7 @@ pipeline {
                     sh """
                         find . -type f -name '*.tmp' -delete || true
                         find . -type d -name 'TestResults' -exec rm -rf {} + || true
-                        find . -type d -name 'surefire-reports' -exec rm -rf {} + || true // Clean up JUnit reports
+                        find . -type d -name 'surefire-reports' -exec rm -rf {} + || true
                     """
                 }
             }
