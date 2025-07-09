@@ -358,7 +358,7 @@ pipeline {
                                             --logger "trx;LogFileName=nunit-results-\$(basename '${project}' .csproj).trx" \
                                             --results-directory ${TEST_RESULTS_DIR} \
                                             ${coverageArg} \
-                                            --verbosity ${dotnetVerbosity}}
+                                            --verbosity ${dotnetVerbosity}
                                     """
                                 }
                             } else {
@@ -415,7 +415,7 @@ pipeline {
                                             --logger "trx;LogFileName=xunit-results-\$(basename '${project}' .csproj).trx" \
                                             --results-directory ${TEST_RESULTS_DIR} \
                                             ${coverageArg} \
-                                            --verbosity ${dotnetVerbosity}}
+                                            --verbosity ${dotnetVerbosity}
                                     """
                                 }
                             } else {
