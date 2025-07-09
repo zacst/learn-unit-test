@@ -369,14 +369,22 @@ pipeline {
                     post {
                         always {
                             script {
-                                // Publish all NUnit test results
+                                // Find all matching TRX files
                                 def trxFiles = sh(
                                     script: "find ${TEST_RESULTS_DIR} -type f -name '*nunit-results*.trx' || true",
                                     returnStdout: true
                                 ).trim()
-                                
+
                                 if (trxFiles) {
-                                    mstest testResultsFile: "${TEST_RESULTS_DIR}/*nunit-results*.trx"
+                                    // Archive them manually as artifacts if you want to keep them
+                                    archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/*nunit-results*.trx", allowEmptyArchive: true
+
+                                    // Optional: Convert TRX to JUnit format and publish if needed
+                                    // e.g., using a custom script or a tool like trx2junit
+                                    // then:
+                                    // junit '**/converted-results.xml'
+                                } else {
+                                    echo 'No test result files found.'
                                 }
                             }
                         }
@@ -426,14 +434,22 @@ pipeline {
                     post {
                         always {
                             script {
-                                // Publish all xUnit test results
+                                // Find all matching TRX files
                                 def trxFiles = sh(
-                                    script: "find ${TEST_RESULTS_DIR} -type f -name '*xunit-results*.trx' || true",
+                                    script: "find ${TEST_RESULTS_DIR} -type f -name '*nunit-results*.trx' || true",
                                     returnStdout: true
                                 ).trim()
-                                
+
                                 if (trxFiles) {
-                                    mstest testResultsFile: "${TEST_RESULTS_DIR}/*xunit-results*.trx"
+                                    // Archive them manually as artifacts if you want to keep them
+                                    archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/*nunit-results*.trx", allowEmptyArchive: true
+
+                                    // Optional: Convert TRX to JUnit format and publish if needed
+                                    // e.g., using a custom script or a tool like trx2junit
+                                    // then:
+                                    // junit '**/converted-results.xml'
+                                } else {
+                                    echo 'No test result files found.'
                                 }
                             }
                         }
