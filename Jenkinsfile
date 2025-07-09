@@ -170,19 +170,15 @@ pipeline {
                                     break
                             }
                             
-                            // Find all .NET project files recursively
-                            def dotnetProjects = sh(
-                                script: "find . -type f \\( -name '*.csproj' -o -name '*.sln' \\) | head -1",
-                                returnStdout: true
-                            ).trim()
-                            
-                            if (dotnetProjects) {
-                                sh """
-                                    dotnet restore --verbosity ${dotnetVerbosity}
-                                """
-                            } else {
-                                echo "⚠️  No .NET project files found, skipping restore"
-                            }
+                            sh """
+                                if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "NUNIT_ONLY" ]; then
+                                    dotnet restore csharp-nunit/Calculator/Calculator.sln --verbosity ${dotnetVerbosity}
+                                fi
+
+                                if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "XUNIT_ONLY" ]; then
+                                    dotnet restore csharp-xunit/Calculator/Calculator.sln --verbosity ${dotnetVerbosity}
+                                fi
+                            """
                         }
                     }
                 }
