@@ -251,13 +251,20 @@ pipeline {
                     steps {
                         script {
                             echo "🔨 Building .NET projects..."
-                            
+
                             sh """
                                 mkdir -p ${TEST_RESULTS_DIR}
                                 mkdir -p ${COVERAGE_REPORTS_DIR}
-                                
-                                dotnet build --configuration Release --no-restore \
-                                    --verbosity ${params.LOG_LEVEL.toLowerCase()}
+
+                                if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "NUNIT_ONLY" ]; then
+                                    dotnet build csharp-nunit/Calculator/Calculator.sln --configuration Release --no-restore \\
+                                        --verbosity ${params.LOG_LEVEL.toLowerCase()}
+                                fi
+
+                                if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "XUNIT_ONLY" ]; then
+                                    dotnet build csharp-xunit/Calculator/Calculator.sln --configuration Release --no-restore \\
+                                        --verbosity ${params.LOG_LEVEL.toLowerCase()}
+                                fi
                             """
                         }
                     }
