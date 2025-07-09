@@ -568,11 +568,13 @@ pipeline {
             script {
                 echo "🧹 Post-build cleanup..."
                 
-                // Clean up temporary files
-                sh """
-                    find . -name '*.tmp' -delete || true
-                    find . -name 'TestResults' -type d -exec rm -rf {} + || true
-                """
+                // Wrap sh commands in node block to provide FilePath context
+                node {
+                    sh """
+                        find . -name '*.tmp' -delete || true
+                        find . -name 'TestResults' -type d -exec rm -rf {} + || true
+                    """
+                }
             }
         }
         
