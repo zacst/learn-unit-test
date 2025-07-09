@@ -199,18 +199,27 @@ pipeline {
                         script {
                             echo "📦 Restoring Java dependencies..."
                             
-                            // Check for Maven or Gradle
-                            def hasMaven = fileExists('pom.xml')
-                            def hasGradle = fileExists('build.gradle') || fileExists('build.gradle.kts')
+                            // Changed: Use find to check for pom.xml recursively
+                            def hasMaven = sh(script: "find . -name 'pom.xml' | head -1 || true", returnStdout: true).trim() != ""
+                            // Changed: Use find to check for build.gradle recursively
+                            def hasGradle = sh(script: "find . -name 'build.gradle' -o -name 'build.gradle.kts' | head -1 || true", returnStdout: true).trim() != ""
                             
                             if (hasMaven) {
-                                sh """
-                                    mvn dependency:resolve -q
-                                """
+                                // Changed: Execute Maven from the directory containing pom.xml
+                                def pomDir = sh(script: "dirname $(find . -name 'pom.xml' | head -1)", returnStdout: true).trim()
+                                dir(pomDir) { // Change directory to where the pom.xml is
+                                    sh """
+                                        mvn dependency:resolve -q
+                                    """
+                                }
                             } else if (hasGradle) {
-                                sh """
-                                    ./gradlew dependencies --quiet
-                                """
+                                // Changed: Execute Gradle from the directory containing build.gradle
+                                def gradleDir = sh(script: "dirname $(find . -name 'build.gradle' -o -name 'build.gradle.kts' | head -1)", returnStdout: true).trim()
+                                dir(gradleDir) { // Change directory to where the build.gradle is
+                                    sh """
+                                        ./gradlew dependencies --quiet
+                                    """
+                                }
                             } else {
                                 echo "⚠️  No Java build files found, skipping dependency restore"
                             }
