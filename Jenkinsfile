@@ -347,7 +347,7 @@ pipeline {
                             if (nunitProjects) {
                                 echo "🧪 Found ${nunitProjects.size()} NUnit test projects"
                                 def coverageArg = params.GENERATE_COVERAGE ? 
-                                    "--collect:\"XPlat Code Coverage\" --settings:CodeCoverage.runsettings" : ""
+                                    "--collect:\"XPlat Code Coverage\"" : ""
                                 
                                 nunitProjects.each { project ->
                                     echo "🧪 Running NUnit tests in: ${project}"
@@ -404,7 +404,7 @@ pipeline {
                             if (xunitProjects) {
                                 echo "🧪 Found ${xunitProjects.size()} xUnit test projects"
                                 def coverageArg = params.GENERATE_COVERAGE ? 
-                                    "--collect:\"XPlat Code Coverage\" --settings:CodeCoverage.runsettings" : ""
+                                    "--collect:\"XPlat Code Coverage\"" : ""
                                 
                                 xunitProjects.each { project ->
                                     echo "🧪 Running xUnit tests in: ${project}"
@@ -509,7 +509,7 @@ pipeline {
                                 ).trim()
                                 
                                 if (junitResults) {
-                                    junit testResultsPattern: "**/TEST-*.xml,**/junit-*.xml"
+                                    junit testResults: "**/TEST-*.xml,**/junit-*.xml"
                                 }
                             }
                         }
