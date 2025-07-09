@@ -146,8 +146,9 @@ pipeline {
                         returnStdout: true
                     ).trim().split('\n').findAll { it.trim() }
                     
-                    env.NUNIT_PROJECTS = []
-                    env.XUNIT_PROJECTS = []
+                    // Initialize as proper lists
+                    nunitProjects = []
+                    xunitProjects = []
                     
                     if (allTestProjects && allTestProjects[0]) {
                         echo "📁 Found ${allTestProjects.size()} potential test project(s)"
@@ -158,9 +159,9 @@ pipeline {
                                 echo "   📋 ${project} -> ${framework}"
                                 
                                 if (framework == 'NUNIT') {
-                                    env.NUNIT_PROJECTS += project
+                                    nunitProjects.add(project)
                                 } else if (framework == 'XUNIT') {
-                                    env.XUNIT_PROJECTS += project
+                                    xunitProjects.add(project)
                                 }
                             }
                         }
@@ -168,23 +169,22 @@ pipeline {
                     
                     // Override with hardcoded projects if AUTO detection fails or specific framework is selected
                     if (params.TEST_FRAMEWORK == 'NUNIT' || 
-                        (params.TEST_FRAMEWORK == 'AUTO' && !env.NUNIT_PROJECTS && !env.XUNIT_PROJECTS)) {
+                        (params.TEST_FRAMEWORK == 'AUTO' && nunitProjects.isEmpty() && xunitProjects.isEmpty())) {
                         echo "📋 Using hardcoded NUnit projects"
-                        env.NUNIT_PROJECTS = ['./csharp-nunit/Calculator.Tests/Calculator.Tests.csproj']
+                        nunitProjects = ['./csharp-nunit/Calculator.Tests/Calculator.Tests.csproj']
                     }
                     
                     if (params.TEST_FRAMEWORK == 'XUNIT' || params.TEST_FRAMEWORK == 'BOTH') {
                         echo "📋 Adding XUnit projects (add your XUnit project paths here)"
-                        env.XUNIT_PROJECTS = env.XUNIT_PROJECTS ?: []
                         // Add your XUnit project paths here:
-                        // env.XUNIT_PROJECTS += './csharp-xunit/Calculator.Tests/Calculator.Tests.csproj'
+                        // xunitProjects.add('./csharp-xunit/Calculator.Tests/Calculator.Tests.csproj')
                     }
                     
                     echo "📊 Test Projects Summary:"
-                    echo "   NUnit Projects: ${env.NUNIT_PROJECTS.size()}"
-                    env.NUNIT_PROJECTS.each { echo "     - ${it}" }
-                    echo "   XUnit Projects: ${env.XUNIT_PROJECTS.size()}"
-                    env.XUNIT_PROJECTS.each { echo "     - ${it}" }
+                    echo "   NUnit Projects: ${nunitProjects.size()}"
+                    nunitProjects.each { echo "     - ${it}" }
+                    echo "   XUnit Projects: ${xunitProjects.size()}"
+                    xunitProjects.each { echo "     - ${it}" }
                 }
             }
         }
@@ -261,7 +261,7 @@ pipeline {
                 stage('Run NUnit Tests') {
                     when {
                         expression { 
-                            return env.NUNIT_PROJECTS && env.NUNIT_PROJECTS.size() > 0 &&
+                            return nunitProjects && nunitProjects.size() > 0 &&
                                    (params.TEST_FRAMEWORK == 'AUTO' || params.TEST_FRAMEWORK == 'NUNIT' || params.TEST_FRAMEWORK == 'BOTH')
                         }
                     }
@@ -269,22 +269,23 @@ pipeline {
                         script {
                             echo "🧪 Running NUnit tests..."
                             
-                            if (env.NUNIT_PROJECTS) {
-                                echo "🧪 Running ${env.NUNIT_PROJECTS.size()} NUnit test project(s)"
+                            if (nunitProjects && nunitProjects.size() > 0) {
+                                echo "🧪 Running ${nunitProjects.size()} NUnit test project(s)"
 
                                 def coverageArg = params.GENERATE_COVERAGE 
                                     ? '--collect:"XPlat Code Coverage"' 
                                     : ""
 
-                                env.NUNIT_PROJECTS.each { project ->
+                                nunitProjects.each { project ->
                                     echo "🧪 Running NUnit tests in: ${project}"
+                                    def projectName = project.split('/')[-1].replace('.csproj', '')
                                     sh """
-                                        dotnet test '${project}' \
-                                            --configuration Release \
-                                            --no-build \
-                                            --logger "trx;LogFileName=nunit-results-\$(basename '${project}' .csproj).trx" \
-                                            --results-directory ${TEST_RESULTS_DIR} \
-                                            ${coverageArg} \
+                                        dotnet test '${project}' \\
+                                            --configuration Release \\
+                                            --no-build \\
+                                            --logger "trx;LogFileName=nunit-results-${projectName}.trx" \\
+                                            --results-directory ${TEST_RESULTS_DIR} \\
+                                            ${coverageArg} \\
                                             --verbosity ${dotnetVerbosity}
                                     """
                                 }
@@ -298,7 +299,7 @@ pipeline {
                 stage('Run XUnit Tests') {
                     when {
                         expression { 
-                            return env.XUNIT_PROJECTS && env.XUNIT_PROJECTS.size() > 0 &&
+                            return xunitProjects && xunitProjects.size() > 0 &&
                                    (params.TEST_FRAMEWORK == 'AUTO' || params.TEST_FRAMEWORK == 'XUNIT' || params.TEST_FRAMEWORK == 'BOTH')
                         }
                     }
@@ -306,22 +307,23 @@ pipeline {
                         script {
                             echo "🧪 Running XUnit tests..."
                             
-                            if (env.XUNIT_PROJECTS) {
-                                echo "🧪 Running ${env.XUNIT_PROJECTS.size()} XUnit test project(s)"
+                            if (xunitProjects && xunitProjects.size() > 0) {
+                                echo "🧪 Running ${xunitProjects.size()} XUnit test project(s)"
 
                                 def coverageArg = params.GENERATE_COVERAGE 
                                     ? '--collect:"XPlat Code Coverage"' 
                                     : ""
 
-                                env.XUNIT_PROJECTS.each { project ->
+                                xunitProjects.each { project ->
                                     echo "🧪 Running XUnit tests in: ${project}"
+                                    def projectName = project.split('/')[-1].replace('.csproj', '')
                                     sh """
-                                        dotnet test '${project}' \
-                                            --configuration Release \
-                                            --no-build \
-                                            --logger "trx;LogFileName=xunit-results-\$(basename '${project}' .csproj).trx" \
-                                            --results-directory ${TEST_RESULTS_DIR} \
-                                            ${coverageArg} \
+                                        dotnet test '${project}' \\
+                                            --configuration Release \\
+                                            --no-build \\
+                                            --logger "trx;LogFileName=xunit-results-${projectName}.trx" \\
+                                            --results-directory ${TEST_RESULTS_DIR} \\
+                                            ${coverageArg} \\
                                             --verbosity ${dotnetVerbosity}
                                     """
                                 }
@@ -452,8 +454,8 @@ pipeline {
                     echo "   Build Number: ${env.BUILD_NUMBER}"
                     echo "   Branch: ${env.BRANCH_NAME}"
                     echo "   Test Framework: ${params.TEST_FRAMEWORK}"
-                    echo "   NUnit Projects: ${env.NUNIT_PROJECTS?.size() ?: 0}"
-                    echo "   XUnit Projects: ${env.XUNIT_PROJECTS?.size() ?: 0}"
+                    echo "   NUnit Projects: ${nunitProjects?.size() ?: 0}"
+                    echo "   XUnit Projects: ${xunitProjects?.size() ?: 0}"
                     
                     // Quality gate criteria based on build status
                     if (buildStatus == 'FAILURE') {
