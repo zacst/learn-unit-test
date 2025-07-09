@@ -170,15 +170,15 @@ pipeline {
                                     break
                             }
                             
-                            // Find all .NET project files
+                            // Find all .NET project files recursively
                             def dotnetProjects = sh(
-                                script: "find . -name '*.csproj' -o -name '*.sln' | head -1",
+                                script: "find . -type f \\( -name '*.csproj' -o -name '*.sln' \\) | head -1",
                                 returnStdout: true
                             ).trim()
                             
                             if (dotnetProjects) {
                                 sh """
-                                    dotnet restore --verbosity ${dotnetverbosity}
+                                    dotnet restore --verbosity ${dotnetVerbosity}
                                 """
                             } else {
                                 echo "⚠️  No .NET project files found, skipping restore"
@@ -199,26 +199,34 @@ pipeline {
                         script {
                             echo "📦 Restoring Java dependencies..."
                             
-                            // Changed: Use find to check for pom.xml recursively
-                            def hasMaven = sh(script: "find . -name 'pom.xml' | head -1 || true", returnStdout: true).trim() != ""
-                            // Changed: Use find to check for build.gradle recursively
-                            def hasGradle = sh(script: "find . -name 'build.gradle' -o -name 'build.gradle.kts' | head -1 || true", returnStdout: true).trim() != ""
+                            // Find all Maven and Gradle build files recursively
+                            def allPomFiles = sh(
+                                script: "find . -type f -name 'pom.xml'",
+                                returnStdout: true
+                            ).trim().split('\n').findAll { it.trim() }
                             
-                            if (hasMaven) {
-                                // Changed: Execute Maven from the directory containing pom.xml
-                                def pomDir = sh(script: "dirname $(find . -name 'pom.xml' | head -1)", returnStdout: true).trim()
-                                dir(pomDir) { // Change directory to where the pom.xml is
-                                    sh """
-                                        mvn dependency:resolve -q
-                                    """
+                            def allGradleFiles = sh(
+                                script: "find . -type f \\( -name 'build.gradle' -o -name 'build.gradle.kts' \\)",
+                                returnStdout: true
+                            ).trim().split('\n').findAll { it.trim() }
+                            
+                            if (allPomFiles) {
+                                echo "📦 Found ${allPomFiles.size()} Maven projects"
+                                allPomFiles.each { pomFile ->
+                                    def pomDir = sh(script: "dirname '${pomFile}'", returnStdout: true).trim()
+                                    echo "📦 Restoring Maven dependencies in: ${pomDir}"
+                                    dir(pomDir) {
+                                        sh "mvn dependency:resolve -q"
+                                    }
                                 }
-                            } else if (hasGradle) {
-                                // Changed: Execute Gradle from the directory containing build.gradle
-                                def gradleDir = sh(script: "dirname $(find . -name 'build.gradle' -o -name 'build.gradle.kts' | head -1)", returnStdout: true).trim()
-                                dir(gradleDir) { // Change directory to where the build.gradle is
-                                    sh """
-                                        ./gradlew dependencies --quiet
-                                    """
+                            } else if (allGradleFiles) {
+                                echo "📦 Found ${allGradleFiles.size()} Gradle projects"
+                                allGradleFiles.each { gradleFile ->
+                                    def gradleDir = sh(script: "dirname '${gradleFile}'", returnStdout: true).trim()
+                                    echo "📦 Restoring Gradle dependencies in: ${gradleDir}"
+                                    dir(gradleDir) {
+                                        sh "./gradlew dependencies --quiet"
+                                    }
                                 }
                             } else {
                                 echo "⚠️  No Java build files found, skipping dependency restore"
@@ -267,22 +275,40 @@ pipeline {
                         script {
                             echo "🔨 Building Java projects..."
                             
-                            def hasMaven = fileExists('pom.xml')
-                            def hasGradle = fileExists('build.gradle') || fileExists('build.gradle.kts')
-                            
                             sh """
                                 mkdir -p ${TEST_RESULTS_DIR}
                                 mkdir -p ${COVERAGE_REPORTS_DIR}
                             """
                             
-                            if (hasMaven) {
-                                sh """
-                                    mvn compile test-compile -q
-                                """
-                            } else if (hasGradle) {
-                                sh """
-                                    ./gradlew compileJava compileTestJava --quiet
-                                """
+                            // Build all Maven projects recursively
+                            def allPomFiles = sh(
+                                script: "find . -type f -name 'pom.xml'",
+                                returnStdout: true
+                            ).trim().split('\n').findAll { it.trim() }
+                            
+                            def allGradleFiles = sh(
+                                script: "find . -type f \\( -name 'build.gradle' -o -name 'build.gradle.kts' \\)",
+                                returnStdout: true
+                            ).trim().split('\n').findAll { it.trim() }
+                            
+                            if (allPomFiles) {
+                                echo "🔨 Building ${allPomFiles.size()} Maven projects"
+                                allPomFiles.each { pomFile ->
+                                    def pomDir = sh(script: "dirname '${pomFile}'", returnStdout: true).trim()
+                                    echo "🔨 Building Maven project in: ${pomDir}"
+                                    dir(pomDir) {
+                                        sh "mvn compile test-compile -q"
+                                    }
+                                }
+                            } else if (allGradleFiles) {
+                                echo "🔨 Building ${allGradleFiles.size()} Gradle projects"
+                                allGradleFiles.each { gradleFile ->
+                                    def gradleDir = sh(script: "dirname '${gradleFile}'", returnStdout: true).trim()
+                                    echo "🔨 Building Gradle project in: ${gradleDir}"
+                                    dir(gradleDir) {
+                                        sh "./gradlew compileJava compileTestJava --quiet"
+                                    }
+                                }
                             }
                         }
                     }
@@ -304,24 +330,29 @@ pipeline {
                         script {
                             echo "🧪 Running NUnit tests..."
                             
+                            // Find all NUnit test projects recursively
                             def nunitProjects = sh(
-                                script: "find . -name '*Test*.csproj' -o -name '*Tests*.csproj' | grep -i nunit || true",
+                                script: "find . -type f \\( -name '*Test*.csproj' -o -name '*Tests*.csproj' \\) | xargs grep -l 'nunit' 2>/dev/null || true",
                                 returnStdout: true
-                            ).trim()
+                            ).trim().split('\n').findAll { it.trim() }
                             
                             if (nunitProjects) {
+                                echo "🧪 Found ${nunitProjects.size()} NUnit test projects"
                                 def coverageArg = params.GENERATE_COVERAGE ? 
                                     "--collect:\"XPlat Code Coverage\" --settings:CodeCoverage.runsettings" : ""
                                 
-                                sh """
-                                    dotnet test ${nunitProjects} \
-                                        --configuration Release \
-                                        --no-build \
-                                        --logger "trx;LogFileName=nunit-results.trx" \
-                                        --results-directory ${TEST_RESULTS_DIR} \
-                                        ${coverageArg} \
-                                        --verbosity ${params.LOG_LEVEL.toLowerCase()}
-                                """
+                                nunitProjects.each { project ->
+                                    echo "🧪 Running NUnit tests in: ${project}"
+                                    sh """
+                                        dotnet test '${project}' \
+                                            --configuration Release \
+                                            --no-build \
+                                            --logger "trx;LogFileName=nunit-results-\$(basename '${project}' .csproj).trx" \
+                                            --results-directory ${TEST_RESULTS_DIR} \
+                                            ${coverageArg} \
+                                            --verbosity ${params.LOG_LEVEL.toLowerCase()}
+                                    """
+                                }
                             } else {
                                 echo "⚠️  No NUnit test projects found"
                             }
@@ -330,8 +361,14 @@ pipeline {
                     post {
                         always {
                             script {
-                                if (fileExists("${TEST_RESULTS_DIR}/nunit-results.trx")) {
-                                    mstest testResultsFile: "${TEST_RESULTS_DIR}/nunit-results.trx"
+                                // Publish all NUnit test results
+                                def trxFiles = sh(
+                                    script: "find ${TEST_RESULTS_DIR} -type f -name '*nunit-results*.trx' || true",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (trxFiles) {
+                                    mstest testResultsFile: "${TEST_RESULTS_DIR}/*nunit-results*.trx"
                                 }
                             }
                         }
@@ -350,24 +387,29 @@ pipeline {
                         script {
                             echo "🧪 Running xUnit tests..."
                             
+                            // Find all xUnit test projects recursively
                             def xunitProjects = sh(
-                                script: "find . -name '*Test*.csproj' -o -name '*Tests*.csproj' | grep -i xunit || true",
+                                script: "find . -type f \\( -name '*Test*.csproj' -o -name '*Tests*.csproj' \\) | xargs grep -l 'xunit' 2>/dev/null || true",
                                 returnStdout: true
-                            ).trim()
+                            ).trim().split('\n').findAll { it.trim() }
                             
                             if (xunitProjects) {
+                                echo "🧪 Found ${xunitProjects.size()} xUnit test projects"
                                 def coverageArg = params.GENERATE_COVERAGE ? 
                                     "--collect:\"XPlat Code Coverage\" --settings:CodeCoverage.runsettings" : ""
                                 
-                                sh """
-                                    dotnet test ${xunitProjects} \
-                                        --configuration Release \
-                                        --no-build \
-                                        --logger "trx;LogFileName=xunit-results.trx" \
-                                        --results-directory ${TEST_RESULTS_DIR} \
-                                        ${coverageArg} \
-                                        --verbosity ${params.LOG_LEVEL.toLowerCase()}
-                                """
+                                xunitProjects.each { project ->
+                                    echo "🧪 Running xUnit tests in: ${project}"
+                                    sh """
+                                        dotnet test '${project}' \
+                                            --configuration Release \
+                                            --no-build \
+                                            --logger "trx;LogFileName=xunit-results-\$(basename '${project}' .csproj).trx" \
+                                            --results-directory ${TEST_RESULTS_DIR} \
+                                            ${coverageArg} \
+                                            --verbosity ${params.LOG_LEVEL.toLowerCase()}
+                                    """
+                                }
                             } else {
                                 echo "⚠️  No xUnit test projects found"
                             }
@@ -376,8 +418,14 @@ pipeline {
                     post {
                         always {
                             script {
-                                if (fileExists("${TEST_RESULTS_DIR}/xunit-results.trx")) {
-                                    mstest testResultsFile: "${TEST_RESULTS_DIR}/xunit-results.trx"
+                                // Publish all xUnit test results
+                                def trxFiles = sh(
+                                    script: "find ${TEST_RESULTS_DIR} -type f -name '*xunit-results*.trx' || true",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (trxFiles) {
+                                    mstest testResultsFile: "${TEST_RESULTS_DIR}/*xunit-results*.trx"
                                 }
                             }
                         }
@@ -396,26 +444,48 @@ pipeline {
                         script {
                             echo "🧪 Running JUnit tests..."
                             
-                            def hasMaven = fileExists('pom.xml')
-                            def hasGradle = fileExists('build.gradle') || fileExists('build.gradle.kts')
+                            // Find all Maven and Gradle projects recursively
+                            def allPomFiles = sh(
+                                script: "find . -type f -name 'pom.xml'",
+                                returnStdout: true
+                            ).trim().split('\n').findAll { it.trim() }
                             
-                            if (hasMaven) {
+                            def allGradleFiles = sh(
+                                script: "find . -type f \\( -name 'build.gradle' -o -name 'build.gradle.kts' \\)",
+                                returnStdout: true
+                            ).trim().split('\n').findAll { it.trim() }
+                            
+                            if (allPomFiles) {
+                                echo "🧪 Running JUnit tests in ${allPomFiles.size()} Maven projects"
                                 def coverageProfile = params.GENERATE_COVERAGE ? "-Pcoverage" : ""
                                 
-                                sh """
-                                    mvn test ${coverageProfile} \
-                                        -Dmaven.test.failure.ignore=true \
-                                        -Dsurefire.rerunFailingTestsCount=2 \
-                                        -Dtest.results.dir=${TEST_RESULTS_DIR}
-                                """
-                            } else if (hasGradle) {
+                                allPomFiles.each { pomFile ->
+                                    def pomDir = sh(script: "dirname '${pomFile}'", returnStdout: true).trim()
+                                    echo "🧪 Running JUnit tests in Maven project: ${pomDir}"
+                                    dir(pomDir) {
+                                        sh """
+                                            mvn test ${coverageProfile} \
+                                                -Dmaven.test.failure.ignore=true \
+                                                -Dsurefire.rerunFailingTestsCount=2 \
+                                                -Dtest.results.dir=${TEST_RESULTS_DIR}
+                                        """
+                                    }
+                                }
+                            } else if (allGradleFiles) {
+                                echo "🧪 Running JUnit tests in ${allGradleFiles.size()} Gradle projects"
                                 def coverageTask = params.GENERATE_COVERAGE ? "jacocoTestReport" : ""
                                 
-                                sh """
-                                    ./gradlew test ${coverageTask} \
-                                        --continue \
-                                        -Dtest.results.dir=${TEST_RESULTS_DIR}
-                                """
+                                allGradleFiles.each { gradleFile ->
+                                    def gradleDir = sh(script: "dirname '${gradleFile}'", returnStdout: true).trim()
+                                    echo "🧪 Running JUnit tests in Gradle project: ${gradleDir}"
+                                    dir(gradleDir) {
+                                        sh """
+                                            ./gradlew test ${coverageTask} \
+                                                --continue \
+                                                -Dtest.results.dir=${TEST_RESULTS_DIR}
+                                        """
+                                    }
+                                }
                             } else {
                                 echo "⚠️  No Java build files found"
                             }
@@ -424,9 +494,9 @@ pipeline {
                     post {
                         always {
                             script {
-                                // Publish JUnit test results
+                                // Publish JUnit test results from all subdirectories
                                 def junitResults = sh(
-                                    script: "find . -name 'TEST-*.xml' -o -name 'junit-*.xml' | head -10",
+                                    script: "find . -type f \\( -name 'TEST-*.xml' -o -name 'junit-*.xml' \\)",
                                     returnStdout: true
                                 ).trim()
                                 
@@ -458,9 +528,9 @@ pipeline {
                         script {
                             echo "📊 Generating .NET coverage report..."
                             
-                            // Check if coverage files exist
+                            // Find all coverage files recursively
                             def coverageFiles = sh(
-                                script: "find . -name 'coverage.cobertura.xml' | head -5",
+                                script: "find . -type f -name 'coverage.cobertura.xml'",
                                 returnStdout: true
                             ).trim()
                             
@@ -495,23 +565,41 @@ pipeline {
                         script {
                             echo "📊 Generating Java coverage report..."
                             
-                            def hasMaven = fileExists('pom.xml')
-                            def hasGradle = fileExists('build.gradle') || fileExists('build.gradle.kts')
+                            // Find all Maven and Gradle projects recursively
+                            def allPomFiles = sh(
+                                script: "find . -type f -name 'pom.xml'",
+                                returnStdout: true
+                            ).trim().split('\n').findAll { it.trim() }
                             
-                            if (hasMaven) {
-                                // Maven with JaCoCo
-                                sh """
-                                    if [ -f target/site/jacoco/jacoco.xml ]; then
-                                        cp -r target/site/jacoco ${COVERAGE_REPORTS_DIR}/java/ || true
-                                    fi
-                                """
-                            } else if (hasGradle) {
-                                // Gradle with JaCoCo
-                                sh """
-                                    if [ -d build/reports/jacoco ]; then
-                                        cp -r build/reports/jacoco ${COVERAGE_REPORTS_DIR}/java/ || true
-                                    fi
-                                """
+                            def allGradleFiles = sh(
+                                script: "find . -type f \\( -name 'build.gradle' -o -name 'build.gradle.kts' \\)",
+                                returnStdout: true
+                            ).trim().split('\n').findAll { it.trim() }
+                            
+                            if (allPomFiles) {
+                                echo "📊 Collecting Maven coverage reports from ${allPomFiles.size()} projects"
+                                allPomFiles.each { pomFile ->
+                                    def pomDir = sh(script: "dirname '${pomFile}'", returnStdout: true).trim()
+                                    def projectName = sh(script: "basename '${pomDir}'", returnStdout: true).trim()
+                                    sh """
+                                        if [ -f '${pomDir}/target/site/jacoco/jacoco.xml' ]; then
+                                            mkdir -p ${COVERAGE_REPORTS_DIR}/java/${projectName}
+                                            cp -r '${pomDir}/target/site/jacoco'/* ${COVERAGE_REPORTS_DIR}/java/${projectName}/ || true
+                                        fi
+                                    """
+                                }
+                            } else if (allGradleFiles) {
+                                echo "📊 Collecting Gradle coverage reports from ${allGradleFiles.size()} projects"
+                                allGradleFiles.each { gradleFile ->
+                                    def gradleDir = sh(script: "dirname '${gradleFile}'", returnStdout: true).trim()
+                                    def projectName = sh(script: "basename '${gradleDir}'", returnStdout: true).trim()
+                                    sh """
+                                        if [ -d '${gradleDir}/build/reports/jacoco' ]; then
+                                            mkdir -p ${COVERAGE_REPORTS_DIR}/java/${projectName}
+                                            cp -r '${gradleDir}/build/reports/jacoco'/* ${COVERAGE_REPORTS_DIR}/java/${projectName}/ || true
+                                        fi
+                                    """
+                                }
                             }
                         }
                     }
@@ -532,10 +620,17 @@ pipeline {
                                 sourceFileResolver: sourceFiles('STORE_ALL_BUILD')
                         }
                         
-                        // Java Coverage
-                        if (fileExists("${COVERAGE_REPORTS_DIR}/java/jacoco.xml")) {
-                            publishCoverage adapters: [jacocoAdapter("${COVERAGE_REPORTS_DIR}/java/jacoco.xml")],
-                                sourceFileResolver: sourceFiles('STORE_ALL_BUILD')
+                        // Java Coverage - find all jacoco.xml files recursively
+                        def jacocoFiles = sh(
+                            script: "find ${COVERAGE_REPORTS_DIR}/java -type f -name 'jacoco.xml' | head -10",
+                            returnStdout: true
+                        ).trim().split('\n').findAll { it.trim() }
+                        
+                        jacocoFiles.each { jacocoFile ->
+                            if (fileExists(jacocoFile)) {
+                                publishCoverage adapters: [jacocoAdapter(jacocoFile)],
+                                    sourceFileResolver: sourceFiles('STORE_ALL_BUILD')
+                            }
                         }
                     }
                     
@@ -599,8 +694,8 @@ pipeline {
                 // Wrap sh commands in node block to provide FilePath context
                 node {
                     sh """
-                        find . -name '*.tmp' -delete || true
-                        find . -name 'TestResults' -type d -exec rm -rf {} + || true
+                        find . -type f -name '*.tmp' -delete || true
+                        find . -type d -name 'TestResults' -exec rm -rf {} + || true
                     """
                 }
             }
