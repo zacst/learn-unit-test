@@ -40,6 +40,11 @@ pipeline {
             choices: ['INFO', 'DEBUG', 'WARN', 'ERROR'],
             description: 'Set logging level for test execution'
         )
+        choice(
+            name: 'TEST_FRAMEWORK',
+            choices: ['AUTO', 'NUNIT', 'XUNIT', 'BOTH'],
+            description: 'Choose test framework to run (AUTO detects automatically)'
+        )
     }
     
     stages {
@@ -63,6 +68,7 @@ pipeline {
                             dotnetVerbosity = 'n'
                     }
                     echo "🔧 dotnetVerbosity set to: ${dotnetVerbosity}"
+                    echo "🧪 Test framework selection: ${params.TEST_FRAMEWORK}"
                 }
             }
         }
@@ -87,7 +93,6 @@ pipeline {
                     echo "   Branch: ${env.BRANCH_NAME}"
                     echo "   Commit: ${env.GIT_COMMIT_SHORT}"
                     echo "   Message: ${env.GIT_COMMIT_MSG}"
-                    echo "   Test Framework: NUnit"
                 }
             }
         }
@@ -117,14 +122,99 @@ pipeline {
             }
         }
         
+        stage('Discover Test Projects') {
+            steps {
+                script {
+                    echo "🔍 Discovering test projects..."
+                    
+                    // Function to detect test framework from project file
+                    def detectTestFramework = { projectPath ->
+                        def projectContent = readFile(projectPath)
+                        if (projectContent.contains('Microsoft.NET.Test.Sdk')) {
+                            if (projectContent.contains('NUnit')) {
+                                return 'NUNIT'
+                            } else if (projectContent.contains('xunit')) {
+                                return 'XUNIT'
+                            }
+                        }
+                        return 'UNKNOWN'
+                    }
+                    
+                    // Find all test projects
+                    def allTestProjects = sh(
+                        script: "find . -name '*.csproj' -path '*/Test*' -o -name '*.csproj' -path '*/*Test*' | head -50",
+                        returnStdout: true
+                    ).trim().split('\n').findAll { it.trim() }
+                    
+                    env.NUNIT_PROJECTS = []
+                    env.XUNIT_PROJECTS = []
+                    
+                    if (allTestProjects && allTestProjects[0]) {
+                        echo "📁 Found ${allTestProjects.size()} potential test project(s)"
+                        
+                        allTestProjects.each { project ->
+                            if (fileExists(project)) {
+                                def framework = detectTestFramework(project)
+                                echo "   📋 ${project} -> ${framework}"
+                                
+                                if (framework == 'NUNIT') {
+                                    env.NUNIT_PROJECTS += project
+                                } else if (framework == 'XUNIT') {
+                                    env.XUNIT_PROJECTS += project
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Override with hardcoded projects if AUTO detection fails or specific framework is selected
+                    if (params.TEST_FRAMEWORK == 'NUNIT' || 
+                        (params.TEST_FRAMEWORK == 'AUTO' && !env.NUNIT_PROJECTS && !env.XUNIT_PROJECTS)) {
+                        echo "📋 Using hardcoded NUnit projects"
+                        env.NUNIT_PROJECTS = ['./csharp-nunit/Calculator.Tests/Calculator.Tests.csproj']
+                    }
+                    
+                    if (params.TEST_FRAMEWORK == 'XUNIT' || params.TEST_FRAMEWORK == 'BOTH') {
+                        echo "📋 Adding XUnit projects (add your XUnit project paths here)"
+                        env.XUNIT_PROJECTS = env.XUNIT_PROJECTS ?: []
+                        // Add your XUnit project paths here:
+                        // env.XUNIT_PROJECTS += './csharp-xunit/Calculator.Tests/Calculator.Tests.csproj'
+                    }
+                    
+                    echo "📊 Test Projects Summary:"
+                    echo "   NUnit Projects: ${env.NUNIT_PROJECTS.size()}"
+                    env.NUNIT_PROJECTS.each { echo "     - ${it}" }
+                    echo "   XUnit Projects: ${env.XUNIT_PROJECTS.size()}"
+                    env.XUNIT_PROJECTS.each { echo "     - ${it}" }
+                }
+            }
+        }
+        
         stage('Restore .NET Dependencies') {
             steps {
                 script {
                     echo "📦 Restoring .NET dependencies..."
                     
-                    sh """
-                        dotnet restore csharp-nunit/Calculator.sln --verbosity ${dotnetVerbosity}
-                    """
+                    // Find solution files
+                    def solutionFiles = sh(
+                        script: "find . -name '*.sln' | head -10",
+                        returnStdout: true
+                    ).trim().split('\n').findAll { it.trim() }
+                    
+                    if (solutionFiles && solutionFiles[0]) {
+                        solutionFiles.each { sln ->
+                            if (fileExists(sln)) {
+                                echo "📦 Restoring solution: ${sln}"
+                                sh """
+                                    dotnet restore '${sln}' --verbosity ${dotnetVerbosity}
+                                """
+                            }
+                        }
+                    } else {
+                        echo "📦 No solution files found, restoring all projects..."
+                        sh """
+                            dotnet restore --verbosity ${dotnetVerbosity}
+                        """
+                    }
                 }
             }
         }
@@ -137,45 +227,108 @@ pipeline {
                     sh """
                         mkdir -p ${TEST_RESULTS_DIR}
                         mkdir -p ${COVERAGE_REPORTS_DIR}
-
-                        dotnet build csharp-nunit/Calculator.sln --configuration Release --no-restore \\
-                            --verbosity ${dotnetVerbosity}
                     """
+                    
+                    // Find solution files
+                    def solutionFiles = sh(
+                        script: "find . -name '*.sln' | head -10",
+                        returnStdout: true
+                    ).trim().split('\n').findAll { it.trim() }
+                    
+                    if (solutionFiles && solutionFiles[0]) {
+                        solutionFiles.each { sln ->
+                            if (fileExists(sln)) {
+                                echo "🔨 Building solution: ${sln}"
+                                sh """
+                                    dotnet build '${sln}' --configuration Release --no-restore \\
+                                        --verbosity ${dotnetVerbosity}
+                                """
+                            }
+                        }
+                    } else {
+                        echo "🔨 No solution files found, building all projects..."
+                        sh """
+                            dotnet build --configuration Release --no-restore \\
+                                --verbosity ${dotnetVerbosity}
+                        """
+                    }
                 }
             }
         }
         
-        stage('Run NUnit Tests') {
-            steps {
-                script {
-                    echo "🧪 Running NUnit tests..."
-                    
-                    // Hardcoded list of NUnit test projects
-                    def nunitProjects = [
-                        './csharp-nunit/Calculator.Tests/Calculator.Tests.csproj',
-                    ]
-
-                    if (nunitProjects) {
-                        echo "🧪 Running ${nunitProjects.size()} NUnit test project(s)"
-
-                        def coverageArg = params.GENERATE_COVERAGE 
-                            ? '--collect:"XPlat Code Coverage"' 
-                            : ""
-
-                        nunitProjects.each { project ->
-                            echo "🧪 Running NUnit tests in: ${project}"
-                            sh """
-                                dotnet test '${project}' \
-                                    --configuration Release \
-                                    --no-build \
-                                    --logger "trx;LogFileName=nunit-results-\$(basename '${project}' .csproj).trx" \
-                                    --results-directory ${TEST_RESULTS_DIR} \
-                                    ${coverageArg} \
-                                    --verbosity ${dotnetVerbosity}
-                            """
+        stage('Run Tests') {
+            parallel {
+                stage('Run NUnit Tests') {
+                    when {
+                        expression { 
+                            return env.NUNIT_PROJECTS && env.NUNIT_PROJECTS.size() > 0 &&
+                                   (params.TEST_FRAMEWORK == 'AUTO' || params.TEST_FRAMEWORK == 'NUNIT' || params.TEST_FRAMEWORK == 'BOTH')
                         }
-                    } else {
-                        echo "⚠️  No NUnit test projects specified"
+                    }
+                    steps {
+                        script {
+                            echo "🧪 Running NUnit tests..."
+                            
+                            if (env.NUNIT_PROJECTS) {
+                                echo "🧪 Running ${env.NUNIT_PROJECTS.size()} NUnit test project(s)"
+
+                                def coverageArg = params.GENERATE_COVERAGE 
+                                    ? '--collect:"XPlat Code Coverage"' 
+                                    : ""
+
+                                env.NUNIT_PROJECTS.each { project ->
+                                    echo "🧪 Running NUnit tests in: ${project}"
+                                    sh """
+                                        dotnet test '${project}' \
+                                            --configuration Release \
+                                            --no-build \
+                                            --logger "trx;LogFileName=nunit-results-\$(basename '${project}' .csproj).trx" \
+                                            --results-directory ${TEST_RESULTS_DIR} \
+                                            ${coverageArg} \
+                                            --verbosity ${dotnetVerbosity}
+                                    """
+                                }
+                            } else {
+                                echo "⚠️  No NUnit test projects found"
+                            }
+                        }
+                    }
+                }
+                
+                stage('Run XUnit Tests') {
+                    when {
+                        expression { 
+                            return env.XUNIT_PROJECTS && env.XUNIT_PROJECTS.size() > 0 &&
+                                   (params.TEST_FRAMEWORK == 'AUTO' || params.TEST_FRAMEWORK == 'XUNIT' || params.TEST_FRAMEWORK == 'BOTH')
+                        }
+                    }
+                    steps {
+                        script {
+                            echo "🧪 Running XUnit tests..."
+                            
+                            if (env.XUNIT_PROJECTS) {
+                                echo "🧪 Running ${env.XUNIT_PROJECTS.size()} XUnit test project(s)"
+
+                                def coverageArg = params.GENERATE_COVERAGE 
+                                    ? '--collect:"XPlat Code Coverage"' 
+                                    : ""
+
+                                env.XUNIT_PROJECTS.each { project ->
+                                    echo "🧪 Running XUnit tests in: ${project}"
+                                    sh """
+                                        dotnet test '${project}' \
+                                            --configuration Release \
+                                            --no-build \
+                                            --logger "trx;LogFileName=xunit-results-\$(basename '${project}' .csproj).trx" \
+                                            --results-directory ${TEST_RESULTS_DIR} \
+                                            ${coverageArg} \
+                                            --verbosity ${dotnetVerbosity}
+                                    """
+                                }
+                            } else {
+                                echo "⚠️  No XUnit test projects found"
+                            }
+                        }
                     }
                 }
             }
@@ -184,20 +337,23 @@ pipeline {
                     script {
                         // Find all matching TRX files
                         def trxFiles = sh(
-                            script: "find ${TEST_RESULTS_DIR} -type f -name '*nunit-results*.trx' || true",
+                            script: "find ${TEST_RESULTS_DIR} -type f -name '*-results*.trx' || true",
                             returnStdout: true
                         ).trim()
 
                         if (trxFiles) {
-                            // Archive them manually as artifacts if you want to keep them
-                            archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/*nunit-results*.trx", allowEmptyArchive: true
+                            echo "📊 Found test result files:"
+                            trxFiles.split('\n').each { file ->
+                                echo "   - ${file}"
+                            }
+                            
+                            // Archive them as artifacts
+                            archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/*-results*.trx", allowEmptyArchive: true
 
                             // Optional: Convert TRX to JUnit format and publish if needed
-                            // e.g., using a custom script or a tool like trx2junit
-                            // then:
-                            // junit '**/converted-results.xml'
+                            // publishTestResults adapters: [[$class: 'MSTestResultsTestDataPublisher', testResultsFile: "${TEST_RESULTS_DIR}/*.trx"]]
                         } else {
-                            echo 'No test result files found.'
+                            echo '⚠️  No test result files found.'
                         }
                     }
                 }
@@ -219,6 +375,11 @@ pipeline {
                     ).trim()
                     
                     if (coverageFiles) {
+                        echo "📊 Found coverage files:"
+                        coverageFiles.split('\n').each { file ->
+                            echo "   - ${file}"
+                        }
+                        
                         sh """
                             # Install ReportGenerator if not already installed
                             dotnet tool install --global dotnet-reportgenerator-globaltool || true
@@ -290,6 +451,9 @@ pipeline {
                     echo "   Current Status: ${buildStatus}"
                     echo "   Build Number: ${env.BUILD_NUMBER}"
                     echo "   Branch: ${env.BRANCH_NAME}"
+                    echo "   Test Framework: ${params.TEST_FRAMEWORK}"
+                    echo "   NUnit Projects: ${env.NUNIT_PROJECTS?.size() ?: 0}"
+                    echo "   XUnit Projects: ${env.XUNIT_PROJECTS?.size() ?: 0}"
                     
                     // Quality gate criteria based on build status
                     if (buildStatus == 'FAILURE') {
@@ -365,7 +529,7 @@ pipeline {
                 // Optional: Send success notification
                 // slackSend channel: env.SLACK_CHANNEL, 
                 //     color: 'good', 
-                //     message: "✅ NUnit tests passed for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                //     message: "✅ .NET tests passed for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
             }
         }
         
@@ -376,7 +540,7 @@ pipeline {
                 // Optional: Send failure notification
                 // slackSend channel: env.SLACK_CHANNEL, 
                 //     color: 'danger', 
-                //     message: "❌ NUnit tests failed for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                //     message: "❌ .NET tests failed for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
                 
                 // Optional: Send email notification
                 // emailext subject: "❌ Build Failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
@@ -392,7 +556,7 @@ pipeline {
                 // Optional: Send unstable notification
                 // slackSend channel: env.SLACK_CHANNEL, 
                 //     color: 'warning', 
-                //     message: "⚠️  NUnit tests completed with warnings for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                //     message: "⚠️  .NET tests completed with warnings for ${env.JOB_NAME} #${env.BUILD_NUMBER}"
             }
         }
         
