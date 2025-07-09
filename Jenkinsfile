@@ -246,16 +246,32 @@ pipeline {
                     // Publish coverage reports
                     if (params.GENERATE_COVERAGE) {
                         // .NET Coverage
-                        if (fileExists("${COVERAGE_REPORTS_DIR}/dotnet/Cobertura.xml")) {
-                            publishCoverage adapters: [coberturaAdapter("${COVERAGE_REPORTS_DIR}/dotnet/Cobertura.xml")],
-                                sourceFileResolver: sourceFiles('STORE_ALL_BUILD')
+                        def coberturaFile = "${COVERAGE_REPORTS_DIR}/dotnet/Cobertura.xml"
+                        if (fileExists(coberturaFile)) {
+                            echo "📊 Publishing .NET coverage report from: ${coberturaFile}"
+                            try {
+                                recordCoverage tools: [[parser: 'COBERTURA', pattern: coberturaFile]],
+                                    sourceCodeRetention: 'EVERY_BUILD'
+                                echo "✅ Coverage report published successfully"
+                            } catch (Exception e) {
+                                echo "⚠️  Warning: Could not publish coverage report: ${e.getMessage()}"
+                                // Don't fail the build, just warn
+                            }
+                        } else {
+                            echo "⚠️  No .NET coverage file found at: ${coberturaFile}"
                         }
                     }
                     
                     // Archive artifacts
-                    archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/**/*,${COVERAGE_REPORTS_DIR}/**/*",
-                        allowEmptyArchive: true,
-                        fingerprint: true
+                    try {
+                        archiveArtifacts artifacts: "${TEST_RESULTS_DIR}/**/*,${COVERAGE_REPORTS_DIR}/**/*",
+                            allowEmptyArchive: true,
+                            fingerprint: true
+                        echo "✅ Artifacts archived successfully"
+                    } catch (Exception e) {
+                        echo "⚠️  Warning: Could not archive artifacts: ${e.getMessage()}"
+                        // Don't fail the build, just warn
+                    }
                 }
             }
         }
