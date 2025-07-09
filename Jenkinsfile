@@ -52,6 +52,30 @@ pipeline {
     }
     
     stages {
+                stage('Initialize') {
+            steps {
+                script {
+                    switch (params.LOG_LEVEL) {
+                        case 'INFO':
+                            dotnetVerbosity = 'n' // normal
+                            break
+                        case 'DEBUG':
+                            dotnetVerbosity = 'd' // detailed
+                            break
+                        case 'WARN':
+                            dotnetVerbosity = 'm' // minimal
+                            break
+                        case 'ERROR':
+                            dotnetVerbosity = 'q' // quiet
+                            break
+                        default:
+                            dotnetVerbosity = 'n'
+                    }
+                    echo "🔧 dotnetVerbosity set to: ${dotnetVerbosity}"
+                }
+            }
+        }
+
         stage('Checkout') {
             steps {
                 script {
@@ -150,25 +174,6 @@ pipeline {
                     steps {
                         script {
                             echo "📦 Restoring .NET dependencies..."
-
-                            def dotnetVerbosity
-                            switch (params.LOG_LEVEL) {
-                                case 'INFO':
-                                    dotnetVerbosity = 'n' // 'normal'
-                                    break
-                                case 'DEBUG':
-                                    dotnetVerbosity = 'd' // 'detailed'
-                                    break
-                                case 'WARN':
-                                    dotnetVerbosity = 'm' // 'minimal' (closest for warn)
-                                    break
-                                case 'ERROR':
-                                    dotnetVerbosity = 'q' // 'quiet' (closest for error)
-                                    break
-                                default:
-                                    dotnetVerbosity = 'n' // Default to normal
-                                    break
-                            }
                             
                             sh """
                                 if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "NUNIT_ONLY" ]; then
@@ -254,12 +259,12 @@ pipeline {
 
                                 if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "NUNIT_ONLY" ]; then
                                     dotnet build csharp-nunit/Calculator.sln --configuration Release --no-restore \\
-                                        --verbosity ${params.LOG_LEVEL.toLowerCase()}
+                                        --verbosity ${dotnetVerbosity}
                                 fi
 
                                 if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "XUNIT_ONLY" ]; then
                                     dotnet build csharp-xunit/Calculator.sln --configuration Release --no-restore \\
-                                        --verbosity ${params.LOG_LEVEL.toLowerCase()}
+                                        --verbosity ${dotnetVerbosity}
                                 fi
                             """
                         }
@@ -353,7 +358,7 @@ pipeline {
                                             --logger "trx;LogFileName=nunit-results-\$(basename '${project}' .csproj).trx" \
                                             --results-directory ${TEST_RESULTS_DIR} \
                                             ${coverageArg} \
-                                            --verbosity ${params.LOG_LEVEL.toLowerCase()}
+                                            --verbosity ${dotnetVerbosity}}
                                     """
                                 }
                             } else {
@@ -410,7 +415,7 @@ pipeline {
                                             --logger "trx;LogFileName=xunit-results-\$(basename '${project}' .csproj).trx" \
                                             --results-directory ${TEST_RESULTS_DIR} \
                                             ${coverageArg} \
-                                            --verbosity ${params.LOG_LEVEL.toLowerCase()}
+                                            --verbosity ${dotnetVerbosity}}
                                     """
                                 }
                             } else {
