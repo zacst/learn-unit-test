@@ -172,11 +172,11 @@ pipeline {
                             
                             sh """
                                 if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "NUNIT_ONLY" ]; then
-                                    dotnet restore csharp-nunit/Calculator/Calculator.sln --verbosity ${dotnetVerbosity}
+                                    dotnet restore csharp-nunit/Calculator.sln --verbosity ${dotnetVerbosity}
                                 fi
 
                                 if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "XUNIT_ONLY" ]; then
-                                    dotnet restore csharp-xunit/Calculator/Calculator.sln --verbosity ${dotnetVerbosity}
+                                    dotnet restore csharp-xunit/Calculator.sln --verbosity ${dotnetVerbosity}
                                 fi
                             """
                         }
@@ -253,12 +253,12 @@ pipeline {
                                 mkdir -p ${COVERAGE_REPORTS_DIR}
 
                                 if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "NUNIT_ONLY" ]; then
-                                    dotnet build csharp-nunit/Calculator/Calculator.sln --configuration Release --no-restore \\
+                                    dotnet build csharp-nunit/Calculator.sln --configuration Release --no-restore \\
                                         --verbosity ${params.LOG_LEVEL.toLowerCase()}
                                 fi
 
                                 if [ "${params.TEST_FRAMEWORKS}" = "ALL" ] || [ "${params.TEST_FRAMEWORKS}" = "DOTNET_ONLY" ] || [ "${params.TEST_FRAMEWORKS}" = "XUNIT_ONLY" ]; then
-                                    dotnet build csharp-xunit/Calculator/Calculator.sln --configuration Release --no-restore \\
+                                    dotnet build csharp-xunit/Calculator.sln --configuration Release --no-restore \\
                                         --verbosity ${params.LOG_LEVEL.toLowerCase()}
                                 fi
                             """
