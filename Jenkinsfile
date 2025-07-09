@@ -222,13 +222,13 @@ pipeline {
                         sh """
                             # Install ReportGenerator if not already installed
                             dotnet tool install --global dotnet-reportgenerator-globaltool || true
-                            export PATH="$PATH:$HOME/.dotnet/tools"
+                            export PATH="\$PATH:\$HOME/.dotnet/tools"
                             
                             # Generate HTML coverage report
-                            reportgenerator \
-                                -reports:**/coverage.cobertura.xml \
-                                -targetdir:${COVERAGE_REPORTS_DIR}/dotnet \
-                                -reporttypes:Html;Cobertura;JsonSummary \
+                            reportgenerator \\
+                                -reports:**/coverage.cobertura.xml \\
+                                -targetdir:${COVERAGE_REPORTS_DIR}/dotnet \\
+                                -reporttypes:Html,Cobertura,JsonSummary \\
                                 -verbosity:${params.LOG_LEVEL}
                         """
                     } else {
