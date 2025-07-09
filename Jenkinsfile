@@ -562,6 +562,7 @@ pipeline {
                                 sh """
                                     # Install ReportGenerator if not already installed
                                     dotnet tool install --global dotnet-reportgenerator-globaltool || true
+                                    export PATH="$PATH:$HOME/.dotnet/tools"
                                     
                                     # Generate HTML coverage report
                                     reportgenerator \
