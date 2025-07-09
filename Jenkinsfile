@@ -150,18 +150,22 @@ pipeline {
                 script {
                     echo "🧪 Running NUnit tests..."
                     
-                    // Find all NUnit test projects recursively
+                    // Find all NUnit test projects under ./csharp-nunit/
                     def nunitProjects = sh(
-                        script: "find ./csharp-nunit/ -type f \\( -name '*Test*.csproj' -o -name '*Tests*.csproj' \\) | xargs grep -l 'nunit' 2>/dev/null || true",
+                        script: """
+                            find ./csharp-nunit/ -type f \\( -name '*Test*.csproj' -o -name '*Tests*.csproj' \\) |
+                            xargs grep -l '<PackageReference.*nunit' 2>/dev/null || true
+                        """,
                         returnStdout: true
                     ).trim().split('\n').findAll { it.trim() }
 
-                    
                     if (nunitProjects) {
-                        echo "🧪 Found ${nunitProjects.size()} NUnit test projects"
-                        def coverageArg = params.GENERATE_COVERAGE ? 
-                            "--collect:\"XPlat Code Coverage\"" : ""
+                        echo "🧪 Found ${nunitProjects.size()} NUnit test project(s)"
                         
+                        def coverageArg = params.GENERATE_COVERAGE 
+                            ? '--collect:"XPlat Code Coverage"' 
+                            : ""
+
                         nunitProjects.each { project ->
                             echo "🧪 Running NUnit tests in: ${project}"
                             sh """
@@ -175,8 +179,9 @@ pipeline {
                             """
                         }
                     } else {
-                        echo "⚠️  No NUnit test projects found"
+                        echo "⚠️  No NUnit test projects found in ./csharp-nunit/"
                     }
+
                 }
             }
             post {
