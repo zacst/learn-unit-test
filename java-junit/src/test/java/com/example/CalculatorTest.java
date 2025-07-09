@@ -147,7 +147,8 @@ public class CalculatorTest {
     }
 
     @Test
-    @EnabledIf("'true'.equals(systemProperty.get('java.specification.version'))")
+    // FIX: Changed to EnabledIfSystemProperty for correct system property evaluation
+    @EnabledIfSystemProperty(named = "java.specification.version", matches = ".*")
     @DisplayName("Enabled if Java specification version exists")
     void testEnabledIfJavaSpec() {
         assertTrue(calculator.isPositive(100));
@@ -302,11 +303,11 @@ public class CalculatorTest {
     @ParameterizedTest
     @DisplayName("CSV source parameterized test")
     @CsvSource({
-        "1, 1, 1",
+        "1, 2, 1", // FIX: Changed exponent to 2 for squaring
         "2, 2, 4", 
-        "3, 3, 9",
-        "4, 4, 16",
-        "5, 5, 25"
+        "3, 2, 9",
+        "4, 2, 16",
+        "5, 2, 25"
     })
     void testSquareNumbers(int base, int exponent, int expected) {
         assertEquals(expected, calculator.power(base, exponent));
@@ -328,7 +329,7 @@ public class CalculatorTest {
     // @DisplayName("CSV file source parameterized test")
     // @CsvFileSource(resources = "/test-data.csv", numLinesToSkip = 1)
     // void testWithCsvFile(int a, int b, int expected) {
-    //     assertEquals(expected, calculator.add(a, b));
+    //      assertEquals(expected, calculator.add(a, b));
     // }
 
     @ParameterizedTest
@@ -588,7 +589,7 @@ public class CalculatorTest {
         assertEquals(randomA + randomB, result);
         
         System.out.println("Repetition " + repetitionInfo.getCurrentRepetition() + 
-                         " of " + repetitionInfo.getTotalRepetitions());
+                            " of " + repetitionInfo.getTotalRepetitions());
     }
 
     @RepeatedTest(3)
@@ -607,9 +608,9 @@ public class CalculatorTest {
     // =================
 
     @Test
-    @DisplayName("Test info injection")
+    @DisplayName("Test info injection") // FIX: Adjusted assertion in method body
     void testWithTestInfo(TestInfo testInfo) {
-        assertEquals("testWithTestInfo(TestInfo)", testInfo.getDisplayName());
+        assertEquals("Test info injection", testInfo.getDisplayName()); // Should match @DisplayName
         assertTrue(testInfo.getTags().isEmpty());
         assertEquals(CalculatorTest.class, testInfo.getTestClass().get());
         assertEquals("testWithTestInfo", testInfo.getTestMethod().get().getName());
