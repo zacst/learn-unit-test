@@ -150,18 +150,14 @@ pipeline {
                 script {
                     echo "🧪 Running NUnit tests..."
                     
-                    // Find all NUnit test projects under ./csharp-nunit/
-                    def nunitProjects = sh(
-                        script: """
-                            find ./csharp-nunit/ -type f \\( -name '*Test*.csproj' -o -name '*Tests*.csproj' \\) |
-                            xargs grep -l '<PackageReference.*nunit' 2>/dev/null || true
-                        """,
-                        returnStdout: true
-                    ).trim().split('\n').findAll { it.trim() }
+                    // Hardcoded list of NUnit test projects
+                    def nunitProjects = [
+                        './csharp-nunit/Calculator.Tests/Calculator.Tests.csproj',
+                    ]
 
                     if (nunitProjects) {
-                        echo "🧪 Found ${nunitProjects.size()} NUnit test project(s)"
-                        
+                        echo "🧪 Running ${nunitProjects.size()} NUnit test project(s)"
+
                         def coverageArg = params.GENERATE_COVERAGE 
                             ? '--collect:"XPlat Code Coverage"' 
                             : ""
@@ -179,9 +175,8 @@ pipeline {
                             """
                         }
                     } else {
-                        echo "⚠️  No NUnit test projects found in ./csharp-nunit/"
+                        echo "⚠️  No NUnit test projects specified"
                     }
-
                 }
             }
             post {
