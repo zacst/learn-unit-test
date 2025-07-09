@@ -152,9 +152,10 @@ pipeline {
                     
                     // Find all NUnit test projects recursively
                     def nunitProjects = sh(
-                        script: "find . -type f \\( -name '*Test*.csproj' -o -name '*Tests*.csproj' \\) | xargs grep -l 'nunit' 2>/dev/null || true",
+                        script: "find ./csharp-nunit/ -type f \\( -name '*Test*.csproj' -o -name '*Tests*.csproj' \\) | xargs grep -l 'nunit' 2>/dev/null || true",
                         returnStdout: true
                     ).trim().split('\n').findAll { it.trim() }
+
                     
                     if (nunitProjects) {
                         echo "🧪 Found ${nunitProjects.size()} NUnit test projects"
