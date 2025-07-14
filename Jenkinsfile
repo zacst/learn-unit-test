@@ -423,7 +423,7 @@ pipeline {
             }
         }
 
-stage('Upload to JFrog Artifactory') {
+        stage('Upload to JFrog Artifactory') {
             steps {
                 script {
                     echo "📦 Uploading .NET artifacts to JFrog Artifactory..."
@@ -493,41 +493,25 @@ stage('Upload to JFrog Artifactory') {
                                         def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
                                         
                                         try {
-                                            // Debug: List files in the directory to confirm visibility
-                                            def dirPath = absolutePath.substring(0, absolutePath.lastIndexOf('/'))
-                                            def fileName = absolutePath.substring(absolutePath.lastIndexOf('/') + 1)
+                                            // SOLUTION: Use absolute path directly without dir() block
+                                            jf """rt u "${absolutePath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                                --build-name=${JFROG_CLI_BUILD_NAME} \
+                                                --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                                --flat=false"""
                                             
-                                            echo "🔍 Debug - Directory: ${dirPath}"
-                                            echo "🔍 Debug - File: ${fileName}"
-                                            
-                                            sh """
-                                                echo "Directory contents:"
-                                                ls -la "${dirPath}/" | grep "${fileName}" || echo "File not found in directory listing"
-                                                echo "File permissions:"
-                                                ls -la "${absolutePath}" || echo "Cannot stat file"
-                                            """
-                                            
-                                            // Try using relative path from current directory instead
-                                            dir(workingDir) {
-                                                jf """rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
-                                                    --build-name=${JFROG_CLI_BUILD_NAME} \
-                                                    --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                                    --flat=false"""
-                                            }
                                             echo "✅ Successfully uploaded: ${relativePath}"
                                         } catch (Exception uploadException) {
                                             echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
-                                            echo "🔄 Trying alternative approach with cd..."
+                                            echo "🔄 Trying alternative approach..."
                                             
-                                            // Alternative approach: cd to the directory and upload
+                                            // Alternative approach: Use dir() block with relative path
                                             try {
-                                                sh """
-                                                    cd "${workingDir}"
-                                                    jf rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                                dir(workingDir) {
+                                                    jf """rt u "${relativePath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
                                                         --build-name=${JFROG_CLI_BUILD_NAME} \
                                                         --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                                        --flat=false
-                                                """
+                                                        --flat=false"""
+                                                }
                                                 echo "✅ Successfully uploaded with alternative approach: ${relativePath}"
                                             } catch (Exception altException) {
                                                 echo "❌ Alternative approach also failed: ${altException.getMessage()}"
@@ -547,9 +531,18 @@ stage('Upload to JFrog Artifactory') {
                                 if (nugetPackages) {
                                     echo "📦 Found NuGet packages, uploading..."
                                     nugetPackages.split('\n').findAll { it.trim() }.each { packagePath ->
-                                        if (fileExists(packagePath)) {
+                                        def absolutePackagePath = packagePath.startsWith('./') ? 
+                                            "${workingDir}/${packagePath.substring(2)}" : 
+                                            packagePath.startsWith('/') ? packagePath : "${workingDir}/${packagePath}"
+                                        
+                                        def packageExists = sh(
+                                            script: "test -f '${absolutePackagePath}' && echo 'true' || echo 'false'",
+                                            returnStdout: true
+                                        ).trim()
+                                        
+                                        if (packageExists == 'true') {
                                             echo "📤 Uploading NuGet package: ${packagePath}"
-                                            jf """rt u "${packagePath}" ${ARTIFACTORY_REPO_NUGET}/ \
+                                            jf """rt u "${absolutePackagePath}" ${ARTIFACTORY_REPO_NUGET}/ \
                                                 --build-name=${JFROG_CLI_BUILD_NAME} \
                                                 --build-number=${JFROG_CLI_BUILD_NUMBER} \
                                                 --flat=true"""
@@ -558,17 +551,29 @@ stage('Upload to JFrog Artifactory') {
                                 }
                                 
                                 // Upload test results and coverage reports
-                                if (fileExists("${TEST_RESULTS_DIR}")) {
+                                def testResultsPath = "${workingDir}/${TEST_RESULTS_DIR}"
+                                def testResultsExists = sh(
+                                    script: "test -d '${testResultsPath}' && echo 'true' || echo 'false'",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (testResultsExists == 'true') {
                                     echo "📊 Uploading test results..."
-                                    jf """rt u "${TEST_RESULTS_DIR}/*" ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
+                                    jf """rt u "${testResultsPath}/*" ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
                                         --build-name=${JFROG_CLI_BUILD_NAME} \
                                         --build-number=${JFROG_CLI_BUILD_NUMBER} \
                                         --flat=false"""
                                 }
                                 
-                                if (fileExists("${COVERAGE_REPORTS_DIR}")) {
+                                def coveragePath = "${workingDir}/${COVERAGE_REPORTS_DIR}"
+                                def coverageExists = sh(
+                                    script: "test -d '${coveragePath}' && echo 'true' || echo 'false'",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (coverageExists == 'true') {
                                     echo "📊 Uploading coverage reports..."
-                                    jf """rt u "${COVERAGE_REPORTS_DIR}/**" ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
+                                    jf """rt u "${coveragePath}/**" ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
                                         --build-name=${JFROG_CLI_BUILD_NAME} \
                                         --build-number=${JFROG_CLI_BUILD_NUMBER} \
                                         --flat=false"""
