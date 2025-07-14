@@ -428,22 +428,111 @@ pipeline {
                 script {
                     echo "📦 Uploading .NET artifacts to JFrog Artifactory..."
                     
-                    jf 'rt ping'
-                    
-                    def artifactsFound = sh(
-                        script: "find . -name '*.dll' -path '*/bin/Release/*' -o -name '*.exe' -path '*/bin/Release/*' | wc -l",
-                        returnStdout: true
-                    ).trim()
-                    
-                    if (artifactsFound.toInteger() > 0) {
-                        jf """rt u "**/bin/Release/**/*.dll" ${ARTIFACTORY_REPO_BINARIES}/ \
-                            --build-name=${JFROG_CLI_BUILD_NAME} \
-                            --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                            --flat=false \
-                            --regexp=true"""
+                    try {
+                        // Test connection to Artifactory
+                        jf 'rt ping'
+                        echo "✅ JFrog Artifactory connection successful"
+                        
+                        // Find and list all potential artifacts
+                        def artifactsList = sh(
+                            script: """
+                                echo "🔍 Searching for .NET artifacts..."
+                                find . -type f \\( -name '*.dll' -o -name '*.exe' -o -name '*.pdb' \\) \\
+                                    -path '*/bin/Release/*' -o -path '*/bin/Debug/*' | sort
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (artifactsList) {
+                            echo "📋 Found artifacts:"
+                            echo "${artifactsList}"
+                            
+                            def artifactFiles = artifactsList.split('\n').findAll { it.trim() }
+                            
+                            if (artifactFiles.size() > 0) {
+                                echo "📦 Uploading ${artifactFiles.size()} artifact(s)..."
+                                
+                                // Upload each artifact individually to avoid glob pattern issues
+                                artifactFiles.each { artifactPath ->
+                                    if (fileExists(artifactPath)) {
+                                        echo "📤 Uploading: ${artifactPath}"
+                                        
+                                        // Get relative path for target structure
+                                        def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
+                                        
+                                        jf """rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                            --build-name=${JFROG_CLI_BUILD_NAME} \
+                                            --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                            --flat=false"""
+                                    }
+                                }
+                                
+                                // Also try to upload NuGet packages if they exist
+                                def nugetPackages = sh(
+                                    script: "find . -name '*.nupkg' -o -name '*.snupkg' | head -20",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (nugetPackages) {
+                                    echo "📦 Found NuGet packages, uploading..."
+                                    nugetPackages.split('\n').findAll { it.trim() }.each { packagePath ->
+                                        if (fileExists(packagePath)) {
+                                            echo "📤 Uploading NuGet package: ${packagePath}"
+                                            jf """rt u "${packagePath}" ${ARTIFACTORY_REPO_NUGET}/ \
+                                                --build-name=${JFROG_CLI_BUILD_NAME} \
+                                                --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                                --flat=true"""
+                                        }
+                                    }
+                                }
+                                
+                                // Upload test results and coverage reports
+                                if (fileExists("${TEST_RESULTS_DIR}")) {
+                                    echo "📊 Uploading test results..."
+                                    jf """rt u "${TEST_RESULTS_DIR}/*" ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
+                                        --build-name=${JFROG_CLI_BUILD_NAME} \
+                                        --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                        --flat=false"""
+                                }
+                                
+                                if (fileExists("${COVERAGE_REPORTS_DIR}")) {
+                                    echo "📊 Uploading coverage reports..."
+                                    jf """rt u "${COVERAGE_REPORTS_DIR}/**" ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
+                                        --build-name=${JFROG_CLI_BUILD_NAME} \
+                                        --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                        --flat=false"""
+                                }
+                                
+                                // Publish build info
+                                jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
+                                echo "✅ Build info published successfully"
+                                
+                            } else {
+                                echo "⚠️ No artifacts found to upload"
+                            }
+                        } else {
+                            echo "⚠️ No .NET artifacts found in bin/Release or bin/Debug directories"
+                            echo "🔍 Checking alternative locations..."
+                            
+                            // Check for artifacts in other common locations
+                            def alternativeArtifacts = sh(
+                                script: "find . -name '*.dll' -o -name '*.exe' | grep -v '/obj/' | head -10",
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (alternativeArtifacts) {
+                                echo "📋 Found artifacts in alternative locations:"
+                                echo "${alternativeArtifacts}"
+                            } else {
+                                echo "❌ No .NET artifacts found anywhere"
+                            }
+                        }
+                        
+                    } catch (Exception e) {
+                        echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
+                        echo "📊 This is non-critical - marking as unstable"
+                        currentBuild.result = 'UNSTABLE'
                     }
-                    
-                    jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
                 }
             }
         }
