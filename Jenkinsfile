@@ -13,11 +13,15 @@ pipeline {
 
         // SonarQube Configuration
         SONARQUBE_URL = 'http://localhost:9000'
-        SONAR_PROJECT_KEY = 'your-project-key'
+        SONAR_PROJECT_KEY = 'your-project-key' // Replace with your actual SonarQube project key
+
+        // Configure JFrog CLI tool in Jenkins Global Tool Configuration
+        jfrog 'jfrog-cli'
 
         // JFrog Configuration
         JFROG_CLI_BUILD_NAME = "${JOB_NAME}"
         JFROG_CLI_BUILD_NUMBER = "${BUILD_NUMBER}"
+
         ARTIFACTORY_REPO_BINARIES = 'libs-release-local'
         ARTIFACTORY_REPO_NUGET = 'nuget-local'
         ARTIFACTORY_REPO_REPORTS = 'reports-local'
