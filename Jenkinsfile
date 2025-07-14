@@ -448,48 +448,62 @@ pipeline {
                         // Find and list all potential artifacts
                         def artifactsList = sh(
                             script: """
-                                echo "🔍 Searching for .NET artifacts..."
                                 find . -type f \\( -name '*.dll' -o -name '*.exe' -o -name '*.pdb' \\) \\
                                     \\( -path '*/bin/Release/*' -o -path '*/bin/Debug/*' \\) | sort
                             """,
                             returnStdout: true
                         ).trim()
                         
+                        echo "🔍 Searching for .NET artifacts completed"
+                        
                         if (artifactsList) {
                             echo "📋 Found artifacts:"
                             echo "${artifactsList}"
                             
-                            def artifactFiles = artifactsList.split('\n').findAll { it.trim() && !it.trim().isEmpty() }
+                            def artifactFiles = artifactsList.split('\n').findAll { 
+                                it.trim() && !it.trim().isEmpty() && !it.contains('🔍') && !it.contains('Searching')
+                            }
                             
                             if (artifactFiles.size() > 0) {
                                 echo "📦 Uploading ${artifactFiles.size()} artifact(s)..."
+                                
+                                // Get current working directory for absolute paths
+                                def workingDir = sh(script: "pwd", returnStdout: true).trim()
+                                echo "📁 Working directory: ${workingDir}"
                                 
                                 // Upload each artifact individually to avoid glob pattern issues
                                 artifactFiles.each { artifactPath ->
                                     artifactPath = artifactPath.trim()
                                     
-                                    // Double-check that the file exists and is actually a file
-                                    if (fileExists(artifactPath)) {
-                                        def fileType = sh(
-                                            script: "test -f '${artifactPath}' && echo 'file' || echo 'not-file'",
-                                            returnStdout: true
-                                        ).trim()
+                                    // Convert to absolute path
+                                    def absolutePath = artifactPath.startsWith('./') ? 
+                                        "${workingDir}/${artifactPath.substring(2)}" : 
+                                        artifactPath.startsWith('/') ? artifactPath : "${workingDir}/${artifactPath}"
+                                    
+                                    // Double-check that the file exists
+                                    def fileExists = sh(
+                                        script: "test -f '${absolutePath}' && echo 'true' || echo 'false'",
+                                        returnStdout: true
+                                    ).trim()
+                                    
+                                    if (fileExists == 'true') {
+                                        echo "📤 Uploading file: ${artifactPath} (absolute: ${absolutePath})"
                                         
-                                        if (fileType == 'file') {
-                                            echo "📤 Uploading file: ${artifactPath}"
-                                            
-                                            // Get relative path for target structure
-                                            def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
-                                            
-                                            jf """rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                        // Get relative path for target structure
+                                        def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
+                                        
+                                        try {
+                                            jf """rt u "${absolutePath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
                                                 --build-name=${JFROG_CLI_BUILD_NAME} \
                                                 --build-number=${JFROG_CLI_BUILD_NUMBER} \
                                                 --flat=false"""
-                                        } else {
-                                            echo "⚠️ Skipping non-file: ${artifactPath}"
+                                            echo "✅ Successfully uploaded: ${relativePath}"
+                                        } catch (Exception uploadException) {
+                                            echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
+                                            // Continue with other files instead of failing completely
                                         }
                                     } else {
-                                        echo "⚠️ File does not exist: ${artifactPath}"
+                                        echo "⚠️ File does not exist: ${absolutePath}"
                                     }
                                 }
                                 
