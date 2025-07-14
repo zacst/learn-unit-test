@@ -423,7 +423,7 @@ pipeline {
             }
         }
 
-        stage('Upload to JFrog Artifactory') {
+stage('Upload to JFrog Artifactory') {
             steps {
                 script {
                     echo "📦 Uploading .NET artifacts to JFrog Artifactory..."
@@ -493,14 +493,45 @@ pipeline {
                                         def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
                                         
                                         try {
-                                            jf """rt u "${absolutePath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
-                                                --build-name=${JFROG_CLI_BUILD_NAME} \
-                                                --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                                --flat=false"""
+                                            // Debug: List files in the directory to confirm visibility
+                                            def dirPath = absolutePath.substring(0, absolutePath.lastIndexOf('/'))
+                                            def fileName = absolutePath.substring(absolutePath.lastIndexOf('/') + 1)
+                                            
+                                            echo "🔍 Debug - Directory: ${dirPath}"
+                                            echo "🔍 Debug - File: ${fileName}"
+                                            
+                                            sh """
+                                                echo "Directory contents:"
+                                                ls -la "${dirPath}/" | grep "${fileName}" || echo "File not found in directory listing"
+                                                echo "File permissions:"
+                                                ls -la "${absolutePath}" || echo "Cannot stat file"
+                                            """
+                                            
+                                            // Try using relative path from current directory instead
+                                            dir(workingDir) {
+                                                jf """rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                                    --build-name=${JFROG_CLI_BUILD_NAME} \
+                                                    --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                                    --flat=false"""
+                                            }
                                             echo "✅ Successfully uploaded: ${relativePath}"
                                         } catch (Exception uploadException) {
                                             echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
-                                            // Continue with other files instead of failing completely
+                                            echo "🔄 Trying alternative approach with cd..."
+                                            
+                                            // Alternative approach: cd to the directory and upload
+                                            try {
+                                                sh """
+                                                    cd "${workingDir}"
+                                                    jf rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                                        --build-name=${JFROG_CLI_BUILD_NAME} \
+                                                        --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                                        --flat=false
+                                                """
+                                                echo "✅ Successfully uploaded with alternative approach: ${relativePath}"
+                                            } catch (Exception altException) {
+                                                echo "❌ Alternative approach also failed: ${altException.getMessage()}"
+                                            }
                                         }
                                     } else {
                                         echo "⚠️ File does not exist: ${absolutePath}"
