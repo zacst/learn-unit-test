@@ -471,88 +471,68 @@ pipeline {
                                 def workingDir = sh(script: "pwd", returnStdout: true).trim()
                                 echo "📁 Working directory: ${workingDir}"
                                 
-                                // Process each artifact file
+                                // Process each artifact file                                
                                 artifactFiles.each { artifactPath ->
                                     artifactPath = artifactPath.trim()
-                                    
-                                    // Convert to absolute path
-                                    def absolutePath = artifactPath.startsWith('./') ? 
-                                        "${workingDir}/${artifactPath.substring(2)}" : 
-                                        artifactPath.startsWith('/') ? artifactPath : "${workingDir}/${artifactPath}"
                                     
                                     // Get relative path for target structure
                                     def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
                                     
                                     echo "📤 Processing file: ${relativePath}"
-                                    echo "🔍 Absolute path: ${absolutePath}"
                                     
-                                    // SOLUTION: More robust file validation and upload
-                                    def fileValidation = sh(
-                                        script: """
-                                            if [ -f "${absolutePath}" ]; then
-                                                echo "EXISTS"
-                                                ls -la "${absolutePath}"
-                                                file "${absolutePath}"
-                                            else
-                                                echo "NOT_FOUND"
-                                                echo "Directory contents:"
-                                                ls -la "\$(dirname "${absolutePath}")" 2>/dev/null || echo "Directory not found"
-                                            fi
-                                        """,
-                                        returnStdout: true
-                                    ).trim()
-                                    
-                                    if (fileValidation.contains("EXISTS")) {
-                                        echo "✅ File validated: ${relativePath}"
+                                    try {
+                                        // SOLUTION: Use current directory context and relative paths
+                                        jf """rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                            --build-name=${JFROG_CLI_BUILD_NAME} \
+                                            --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                            --flat=false"""
                                         
+                                        echo "✅ Successfully uploaded: ${relativePath}"
+                                        
+                                    } catch (Exception uploadException) {
+                                        echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
+                                        
+                                        // SOLUTION: Try with shell command instead of jf pipeline step
                                         try {
-                                            // SOLUTION: Copy file to temp location with simple name first
-                                            def tempDir = "${workingDir}/temp_upload"
-                                            def tempFileName = relativePath.replaceAll('[^a-zA-Z0-9._-]', '_')
-                                            def tempFilePath = "${tempDir}/${tempFileName}"
+                                            echo "🔄 Trying with shell command..."
                                             
                                             sh """
-                                                mkdir -p "${tempDir}"
-                                                cp "${absolutePath}" "${tempFilePath}"
-                                                echo "Copied to temp: ${tempFilePath}"
-                                                ls -la "${tempFilePath}"
+                                                /var/lib/jenkins/tools/io.jenkins.plugins.jfrog.JfrogInstallation/jfrog-cli/jf rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                                    --build-name=${JFROG_CLI_BUILD_NAME} \
+                                                    --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                                    --flat=false
                                             """
                                             
-                                            // Upload from temp location
-                                            jf """rt u "${tempFilePath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
-                                                --build-name=${JFROG_CLI_BUILD_NAME} \
-                                                --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                                --flat=false"""
+                                            echo "✅ Successfully uploaded with shell: ${relativePath}"
                                             
-                                            // Clean up temp file
-                                            sh "rm -f '${tempFilePath}'"
-                                            echo "✅ Successfully uploaded: ${relativePath}"
+                                        } catch (Exception shellException) {
+                                            echo "❌ Shell approach also failed: ${shellException.getMessage()}"
                                             
-                                        } catch (Exception uploadException) {
-                                            echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
-                                            
-                                            // SOLUTION: Alternative - use glob pattern upload
+                                            // SOLUTION: Final fallback - use tar/zip approach
                                             try {
-                                                echo "🔄 Trying glob pattern upload..."
-                                                def parentDir = new File(absolutePath).getParent()
-                                                def fileName = new File(absolutePath).getName()
+                                                echo "🔄 Trying archive approach..."
                                                 
-                                                dir(parentDir) {
-                                                    jf """rt u "${fileName}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                                // Get directory and filename
+                                                def pathParts = relativePath.split('/')
+                                                def fileName = pathParts[-1]
+                                                def dirPath = pathParts[0..-2].join('/')
+                                                
+                                                sh """
+                                                    cd "${dirPath}"
+                                                    tar -czf "${fileName}.tar.gz" "${fileName}"
+                                                    /var/lib/jenkins/tools/io.jenkins.plugins.jfrog.JfrogInstallation/jfrog-cli/jf rt u "${fileName}.tar.gz" ${ARTIFACTORY_REPO_BINARIES}/${dirPath}/ \
                                                         --build-name=${JFROG_CLI_BUILD_NAME} \
                                                         --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                                        --flat=false"""
-                                                }
-                                                echo "✅ Successfully uploaded with glob pattern: ${relativePath}"
+                                                        --flat=false
+                                                    rm -f "${fileName}.tar.gz"
+                                                """
                                                 
-                                            } catch (Exception altException) {
-                                                echo "❌ All upload attempts failed for: ${relativePath}"
-                                                echo "Error: ${altException.getMessage()}"
+                                                echo "✅ Successfully uploaded as archive: ${relativePath}"
+                                                
+                                            } catch (Exception archiveException) {
+                                                echo "❌ All approaches failed for: ${relativePath}"
                                             }
                                         }
-                                    } else {
-                                        echo "⚠️ File validation failed for: ${absolutePath}"
-                                        echo "Debug info: ${fileValidation}"
                                     }
                                 }
                                 
