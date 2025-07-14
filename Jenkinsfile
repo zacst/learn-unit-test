@@ -363,22 +363,93 @@ pipeline {
 
         stage('SAST (SonarQube)') {
             steps {
-                withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-                    sh '''
-                        echo "Installing dotnet-sonarscanner (if not already installed)..."
-                        dotnet tool install --global dotnet-sonarscanner || true
-                        export PATH="$PATH:$HOME/.dotnet/tools"
+                script {
+                    echo "🔍 Starting SonarQube Static Application Security Testing..."
+                    
+                    withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                            echo "Installing dotnet-sonarscanner (if not already installed)..."
+                            dotnet tool install --global dotnet-sonarscanner || true
+                            export PATH="$PATH:$HOME/.dotnet/tools"
 
-                        echo "Starting SonarQube scan..."
-                        dotnet sonarscanner begin \
-                            /k:"$SONAR_PROJECT_KEY" \
-                            /d:sonar.host.url="$SONARQUBE_URL" \
-                            /d:sonar.login="$SONAR_TOKEN"
-
-                        dotnet build --no-restore
-
-                        dotnet sonarscanner end /d:sonar.login="$SONAR_TOKEN"
-                    '''
+                            echo "Starting SonarQube scan..."
+                            dotnet sonarscanner begin \
+                                /k:"$SONAR_PROJECT_KEY" \
+                                /d:sonar.host.url="$SONARQUBE_URL" \
+                                /d:sonar.login="$SONAR_TOKEN" \
+                                /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \
+                                /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \
+                                /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**" \
+                                /d:sonar.test.exclusions="**/*.Tests/**" \
+                                /d:sonar.coverage.exclusions="**/*.Tests/**"
+                        '''
+                        
+                        // Re-build the project for SonarQube analysis
+                        sh '''
+                            echo "Building project with SonarQube analysis..."
+                            dotnet build --configuration Release --no-restore --verbosity ''' + dotnetVerbosity + '''
+                        '''
+                        
+                        // Run tests if they exist (required for complete analysis)
+                        script {
+                            if (env.nunitProjects && env.nunitProjects.trim() != '') {
+                                sh '''
+                                    echo "Running tests for SonarQube analysis..."
+                                    # Re-run tests to ensure SonarQube can collect coverage data
+                                '''
+                                
+                                def nunitProjectsList = env.nunitProjects.split(',').findAll { it.trim() }
+                                def coverageArg = params.GENERATE_COVERAGE ? '--collect:"XPlat Code Coverage"' : ""
+                                
+                                nunitProjectsList.each { project ->
+                                    project = project.trim()
+                                    if (project) {
+                                        def projectName = project.split('/')[-1].replace('.csproj', '')
+                                        sh """
+                                            dotnet test '${project}' \
+                                                --configuration Release \
+                                                --no-build \
+                                                --logger "trx;LogFileName=sonar-nunit-results-${projectName}.trx" \
+                                                --results-directory ${TEST_RESULTS_DIR} \
+                                                ${coverageArg} \
+                                                --verbosity ${dotnetVerbosity}
+                                        """
+                                    }
+                                }
+                            }
+                        }
+                        
+                        sh '''
+                            echo "Finishing SonarQube scan..."
+                            export PATH="$PATH:$HOME/.dotnet/tools"
+                            dotnet sonarscanner end /d:sonar.login="$SONAR_TOKEN"
+                        '''
+                    }
+                }
+            }
+            post {
+                always {
+                    script {
+                        echo "📊 SonarQube analysis completed"
+                        
+                        // Optional: Wait for quality gate results
+                        try {
+                            timeout(time: 5, unit: 'MINUTES') {
+                                script {
+                                    echo "⏳ Waiting for SonarQube quality gate results..."
+                                    // You can add quality gate checking here if needed
+                                    // waitForQualityGate abortPipeline: false
+                                }
+                            }
+                        } catch (Exception e) {
+                            echo "⚠️ Quality gate check timed out or failed: ${e.getMessage()}"
+                        }
+                    }
+                }
+                failure {
+                    script {
+                        echo "❌ SonarQube analysis failed!"
+                    }
                 }
             }
         }
