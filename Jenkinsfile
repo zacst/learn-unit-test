@@ -433,12 +433,24 @@ pipeline {
                         jf 'rt ping'
                         echo "✅ JFrog Artifactory connection successful"
                         
+                        // Debug: Show current directory and file structure
+                        echo "🔍 Current directory structure:"
+                        sh """
+                            echo "Working directory: \$(pwd)"
+                            echo "Contents of current directory:"
+                            ls -la
+                            echo "Looking for bin directories:"
+                            find . -type d -name 'bin' | head -10
+                            echo "Looking for .NET files in bin directories:"
+                            find . -type f -name '*.dll' -o -name '*.exe' | head -10
+                        """
+                        
                         // Find and list all potential artifacts
                         def artifactsList = sh(
                             script: """
                                 echo "🔍 Searching for .NET artifacts..."
                                 find . -type f \\( -name '*.dll' -o -name '*.exe' -o -name '*.pdb' \\) \\
-                                    -path '*/bin/Release/*' -o -path '*/bin/Debug/*' | sort
+                                    \\( -path '*/bin/Release/*' -o -path '*/bin/Debug/*' \\) | sort
                             """,
                             returnStdout: true
                         ).trim()
@@ -447,23 +459,37 @@ pipeline {
                             echo "📋 Found artifacts:"
                             echo "${artifactsList}"
                             
-                            def artifactFiles = artifactsList.split('\n').findAll { it.trim() }
+                            def artifactFiles = artifactsList.split('\n').findAll { it.trim() && !it.trim().isEmpty() }
                             
                             if (artifactFiles.size() > 0) {
                                 echo "📦 Uploading ${artifactFiles.size()} artifact(s)..."
                                 
                                 // Upload each artifact individually to avoid glob pattern issues
                                 artifactFiles.each { artifactPath ->
+                                    artifactPath = artifactPath.trim()
+                                    
+                                    // Double-check that the file exists and is actually a file
                                     if (fileExists(artifactPath)) {
-                                        echo "📤 Uploading: ${artifactPath}"
+                                        def fileType = sh(
+                                            script: "test -f '${artifactPath}' && echo 'file' || echo 'not-file'",
+                                            returnStdout: true
+                                        ).trim()
                                         
-                                        // Get relative path for target structure
-                                        def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
-                                        
-                                        jf """rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
-                                            --build-name=${JFROG_CLI_BUILD_NAME} \
-                                            --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                            --flat=false"""
+                                        if (fileType == 'file') {
+                                            echo "📤 Uploading file: ${artifactPath}"
+                                            
+                                            // Get relative path for target structure
+                                            def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
+                                            
+                                            jf """rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                                --build-name=${JFROG_CLI_BUILD_NAME} \
+                                                --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                                --flat=false"""
+                                        } else {
+                                            echo "⚠️ Skipping non-file: ${artifactPath}"
+                                        }
+                                    } else {
+                                        echo "⚠️ File does not exist: ${artifactPath}"
                                     }
                                 }
                                 
