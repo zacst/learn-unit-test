@@ -423,7 +423,7 @@ pipeline {
             }
         }
 
-        stage('Upload to JFrog Artifactory') {
+stage('Upload to JFrog Artifactory') {
             steps {
                 script {
                     echo "📦 Uploading .NET artifacts to JFrog Artifactory..."
@@ -445,7 +445,7 @@ pipeline {
                             find . -type f -name '*.dll' -o -name '*.exe' | head -10
                         """
                         
-                        // Find and list all potential artifacts
+                        // Find and list all potential artifacts with existence check
                         def artifactsList = sh(
                             script: """
                                 find . -type f \\( -name '*.dll' -o -name '*.exe' -o -name '*.pdb' \\) \\
@@ -457,7 +457,7 @@ pipeline {
                         echo "🔍 Searching for .NET artifacts completed"
                         
                         if (artifactsList) {
-                            echo "📋 Found artifacts:"
+                            echo "📋 Found potential artifacts:"
                             echo "${artifactsList}"
                             
                             def artifactFiles = artifactsList.split('\n').findAll { 
@@ -465,74 +465,101 @@ pipeline {
                             }
                             
                             if (artifactFiles.size() > 0) {
-                                echo "📦 Uploading ${artifactFiles.size()} artifact(s)..."
+                                echo "📦 Processing ${artifactFiles.size()} artifact(s)..."
                                 
                                 // Get current working directory for absolute paths
                                 def workingDir = sh(script: "pwd", returnStdout: true).trim()
                                 echo "📁 Working directory: ${workingDir}"
                                 
-                                // Process each artifact file                                
+                                // Process each artifact file with existence verification
                                 artifactFiles.each { artifactPath ->
                                     artifactPath = artifactPath.trim()
                                     
-                                    // Get relative path for target structure
-                                    def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
+                                    // Verify file exists before attempting upload
+                                    def fileExists = sh(
+                                        script: "test -f '${artifactPath}' && echo 'true' || echo 'false'",
+                                        returnStdout: true
+                                    ).trim()
                                     
-                                    echo "📤 Processing file: ${relativePath}"
-                                    
-                                    try {
-                                        // SOLUTION: Use current directory context and relative paths
-                                        jf """rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
-                                            --build-name=${JFROG_CLI_BUILD_NAME} \
-                                            --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                            --flat=false"""
+                                    if (fileExists == 'true') {
+                                        // Get relative path for target structure
+                                        def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
                                         
-                                        echo "✅ Successfully uploaded: ${relativePath}"
+                                        echo "📤 Processing file: ${relativePath}"
                                         
-                                    } catch (Exception uploadException) {
-                                        echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
-                                        
-                                        // SOLUTION: Try with shell command instead of jf pipeline step
                                         try {
-                                            echo "🔄 Trying with shell command..."
+                                            // SOLUTION: Use jf command with proper file existence check
+                                            jf """rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                                --build-name=${JFROG_CLI_BUILD_NAME} \
+                                                --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                                --flat=false"""
                                             
-                                            sh """
-                                                /var/lib/jenkins/tools/io.jenkins.plugins.jfrog.JfrogInstallation/jfrog-cli/jf rt u "${artifactPath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                            echo "✅ Successfully uploaded: ${relativePath}"
+                                            
+                                        } catch (Exception uploadException) {
+                                            echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
+                                            
+                                            // SOLUTION: Try with absolute path
+                                            try {
+                                                echo "🔄 Trying with absolute path..."
+                                                
+                                                def absolutePath = artifactPath.startsWith('/') ? artifactPath : "${workingDir}/${artifactPath}"
+                                                
+                                                jf """rt u "${absolutePath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
                                                     --build-name=${JFROG_CLI_BUILD_NAME} \
                                                     --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                                    --flat=false
-                                            """
-                                            
-                                            echo "✅ Successfully uploaded with shell: ${relativePath}"
-                                            
-                                        } catch (Exception shellException) {
-                                            echo "❌ Shell approach also failed: ${shellException.getMessage()}"
-                                            
-                                            // SOLUTION: Final fallback - use tar/zip approach
-                                            try {
-                                                echo "🔄 Trying archive approach..."
+                                                    --flat=false"""
                                                 
-                                                // Get directory and filename
-                                                def pathParts = relativePath.split('/')
-                                                def fileName = pathParts[-1]
-                                                def dirPath = pathParts[0..-2].join('/')
+                                                echo "✅ Successfully uploaded with absolute path: ${relativePath}"
                                                 
-                                                sh """
-                                                    cd "${dirPath}"
-                                                    tar -czf "${fileName}.tar.gz" "${fileName}"
-                                                    /var/lib/jenkins/tools/io.jenkins.plugins.jfrog.JfrogInstallation/jfrog-cli/jf rt u "${fileName}.tar.gz" ${ARTIFACTORY_REPO_BINARIES}/${dirPath}/ \
+                                            } catch (Exception absoluteException) {
+                                                echo "❌ Absolute path approach also failed: ${absoluteException.getMessage()}"
+                                                
+                                                // SOLUTION: Final fallback - use tar/zip approach with proper directory handling
+                                                try {
+                                                    echo "🔄 Trying archive approach..."
+                                                    
+                                                    // Get directory and filename
+                                                    def file = new File(artifactPath)
+                                                    def fileName = file.name
+                                                    def parentDir = file.parent ?: "."
+                                                    
+                                                    // Create archive in the file's directory
+                                                    def archiveName = "${fileName}.tar.gz"
+                                                    
+                                                    sh """
+                                                        cd "${parentDir}"
+                                                        if [ -f "${fileName}" ]; then
+                                                            tar -czf "${archiveName}" "${fileName}"
+                                                            echo "Archive created: ${archiveName}"
+                                                        else
+                                                            echo "File not found in directory: ${fileName}"
+                                                            exit 1
+                                                        fi
+                                                    """
+                                                    
+                                                    // Upload the archive using jf command (not shell)
+                                                    def archivePath = "${parentDir}/${archiveName}"
+                                                    def targetPath = "${relativePath}.tar.gz"
+                                                    
+                                                    jf """rt u "${archivePath}" ${ARTIFACTORY_REPO_BINARIES}/${targetPath} \
                                                         --build-name=${JFROG_CLI_BUILD_NAME} \
                                                         --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                                        --flat=false
-                                                    rm -f "${fileName}.tar.gz"
-                                                """
-                                                
-                                                echo "✅ Successfully uploaded as archive: ${relativePath}"
-                                                
-                                            } catch (Exception archiveException) {
-                                                echo "❌ All approaches failed for: ${relativePath}"
+                                                        --flat=false"""
+                                                    
+                                                    // Clean up archive
+                                                    sh "rm -f '${archivePath}'"
+                                                    
+                                                    echo "✅ Successfully uploaded as archive: ${targetPath}"
+                                                    
+                                                } catch (Exception archiveException) {
+                                                    echo "❌ All approaches failed for: ${relativePath}"
+                                                    echo "Error: ${archiveException.getMessage()}"
+                                                }
                                             }
                                         }
+                                    } else {
+                                        echo "⚠️ File does not exist, skipping: ${artifactPath}"
                                     }
                                 }
                                 
@@ -545,21 +572,23 @@ pipeline {
                                 if (nugetPackages) {
                                     echo "📦 Found NuGet packages, uploading..."
                                     nugetPackages.split('\n').findAll { it.trim() }.each { packagePath ->
-                                        def absolutePackagePath = packagePath.startsWith('./') ? 
-                                            "${workingDir}/${packagePath.substring(2)}" : 
-                                            packagePath.startsWith('/') ? packagePath : "${workingDir}/${packagePath}"
-                                        
                                         def packageExists = sh(
-                                            script: "test -f '${absolutePackagePath}' && echo 'true' || echo 'false'",
+                                            script: "test -f '${packagePath}' && echo 'true' || echo 'false'",
                                             returnStdout: true
                                         ).trim()
                                         
                                         if (packageExists == 'true') {
                                             echo "📤 Uploading NuGet package: ${packagePath}"
-                                            jf """rt u "${absolutePackagePath}" ${ARTIFACTORY_REPO_NUGET}/ \
-                                                --build-name=${JFROG_CLI_BUILD_NAME} \
-                                                --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                                --flat=true"""
+                                            
+                                            try {
+                                                jf """rt u "${packagePath}" ${ARTIFACTORY_REPO_NUGET}/ \
+                                                    --build-name=${JFROG_CLI_BUILD_NAME} \
+                                                    --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                                    --flat=true"""
+                                                echo "✅ Successfully uploaded NuGet package: ${packagePath}"
+                                            } catch (Exception nugetException) {
+                                                echo "❌ Failed to upload NuGet package ${packagePath}: ${nugetException.getMessage()}"
+                                            }
                                         }
                                     }
                                 }
@@ -573,10 +602,15 @@ pipeline {
                                 
                                 if (testResultsExists == 'true') {
                                     echo "📊 Uploading test results..."
-                                    jf """rt u "${testResultsPath}/*" ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
-                                        --build-name=${JFROG_CLI_BUILD_NAME} \
-                                        --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                        --flat=false"""
+                                    try {
+                                        jf """rt u "${testResultsPath}/*" ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
+                                            --build-name=${JFROG_CLI_BUILD_NAME} \
+                                            --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                            --flat=false"""
+                                        echo "✅ Test results uploaded successfully"
+                                    } catch (Exception testException) {
+                                        echo "❌ Failed to upload test results: ${testException.getMessage()}"
+                                    }
                                 }
                                 
                                 def coveragePath = "${workingDir}/${COVERAGE_REPORTS_DIR}"
@@ -587,15 +621,24 @@ pipeline {
                                 
                                 if (coverageExists == 'true') {
                                     echo "📊 Uploading coverage reports..."
-                                    jf """rt u "${coveragePath}/**" ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
-                                        --build-name=${JFROG_CLI_BUILD_NAME} \
-                                        --build-number=${JFROG_CLI_BUILD_NUMBER} \
-                                        --flat=false"""
+                                    try {
+                                        jf """rt u "${coveragePath}/**" ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ \
+                                            --build-name=${JFROG_CLI_BUILD_NAME} \
+                                            --build-number=${JFROG_CLI_BUILD_NUMBER} \
+                                            --flat=false"""
+                                        echo "✅ Coverage reports uploaded successfully"
+                                    } catch (Exception coverageException) {
+                                        echo "❌ Failed to upload coverage reports: ${coverageException.getMessage()}"
+                                    }
                                 }
                                 
                                 // Publish build info
-                                jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
-                                echo "✅ Build info published successfully"
+                                try {
+                                    jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
+                                    echo "✅ Build info published successfully"
+                                } catch (Exception buildInfoException) {
+                                    echo "❌ Failed to publish build info: ${buildInfoException.getMessage()}"
+                                }
                                 
                             } else {
                                 echo "⚠️ No artifacts found to upload"
