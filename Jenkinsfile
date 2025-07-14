@@ -471,7 +471,7 @@ pipeline {
                                 def workingDir = sh(script: "pwd", returnStdout: true).trim()
                                 echo "📁 Working directory: ${workingDir}"
                                 
-                                // Upload each artifact individually to avoid glob pattern issues
+                                // Process each artifact file
                                 artifactFiles.each { artifactPath ->
                                     artifactPath = artifactPath.trim()
                                     
@@ -480,45 +480,79 @@ pipeline {
                                         "${workingDir}/${artifactPath.substring(2)}" : 
                                         artifactPath.startsWith('/') ? artifactPath : "${workingDir}/${artifactPath}"
                                     
-                                    // Double-check that the file exists
-                                    def fileExists = sh(
-                                        script: "test -f '${absolutePath}' && echo 'true' || echo 'false'",
+                                    // Get relative path for target structure
+                                    def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
+                                    
+                                    echo "📤 Processing file: ${relativePath}"
+                                    echo "🔍 Absolute path: ${absolutePath}"
+                                    
+                                    // SOLUTION: More robust file validation and upload
+                                    def fileValidation = sh(
+                                        script: """
+                                            if [ -f "${absolutePath}" ]; then
+                                                echo "EXISTS"
+                                                ls -la "${absolutePath}"
+                                                file "${absolutePath}"
+                                            else
+                                                echo "NOT_FOUND"
+                                                echo "Directory contents:"
+                                                ls -la "\$(dirname "${absolutePath}")" 2>/dev/null || echo "Directory not found"
+                                            fi
+                                        """,
                                         returnStdout: true
                                     ).trim()
                                     
-                                    if (fileExists == 'true') {
-                                        echo "📤 Uploading file: ${artifactPath} (absolute: ${absolutePath})"
-                                        
-                                        // Get relative path for target structure
-                                        def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
+                                    if (fileValidation.contains("EXISTS")) {
+                                        echo "✅ File validated: ${relativePath}"
                                         
                                         try {
-                                            // SOLUTION: Use absolute path directly without dir() block
-                                            jf """rt u "${absolutePath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                            // SOLUTION: Copy file to temp location with simple name first
+                                            def tempDir = "${workingDir}/temp_upload"
+                                            def tempFileName = relativePath.replaceAll('[^a-zA-Z0-9._-]', '_')
+                                            def tempFilePath = "${tempDir}/${tempFileName}"
+                                            
+                                            sh """
+                                                mkdir -p "${tempDir}"
+                                                cp "${absolutePath}" "${tempFilePath}"
+                                                echo "Copied to temp: ${tempFilePath}"
+                                                ls -la "${tempFilePath}"
+                                            """
+                                            
+                                            // Upload from temp location
+                                            jf """rt u "${tempFilePath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
                                                 --build-name=${JFROG_CLI_BUILD_NAME} \
                                                 --build-number=${JFROG_CLI_BUILD_NUMBER} \
                                                 --flat=false"""
                                             
+                                            // Clean up temp file
+                                            sh "rm -f '${tempFilePath}'"
                                             echo "✅ Successfully uploaded: ${relativePath}"
+                                            
                                         } catch (Exception uploadException) {
                                             echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
-                                            echo "🔄 Trying alternative approach..."
                                             
-                                            // Alternative approach: Use dir() block with relative path
+                                            // SOLUTION: Alternative - use glob pattern upload
                                             try {
-                                                dir(workingDir) {
-                                                    jf """rt u "${relativePath}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
+                                                echo "🔄 Trying glob pattern upload..."
+                                                def parentDir = new File(absolutePath).getParent()
+                                                def fileName = new File(absolutePath).getName()
+                                                
+                                                dir(parentDir) {
+                                                    jf """rt u "${fileName}" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} \
                                                         --build-name=${JFROG_CLI_BUILD_NAME} \
                                                         --build-number=${JFROG_CLI_BUILD_NUMBER} \
                                                         --flat=false"""
                                                 }
-                                                echo "✅ Successfully uploaded with alternative approach: ${relativePath}"
+                                                echo "✅ Successfully uploaded with glob pattern: ${relativePath}"
+                                                
                                             } catch (Exception altException) {
-                                                echo "❌ Alternative approach also failed: ${altException.getMessage()}"
+                                                echo "❌ All upload attempts failed for: ${relativePath}"
+                                                echo "Error: ${altException.getMessage()}"
                                             }
                                         }
                                     } else {
-                                        echo "⚠️ File does not exist: ${absolutePath}"
+                                        echo "⚠️ File validation failed for: ${absolutePath}"
+                                        echo "Debug info: ${fileValidation}"
                                     }
                                 }
                                 
