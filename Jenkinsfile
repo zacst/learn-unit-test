@@ -1,6 +1,11 @@
 pipeline {
     agent any
 
+    tools {
+        // Configure JFrog CLI tool in Jenkins Global Tool Configuration
+        jfrog 'jfrog-cli'
+    }
+
     environment {
         // .NET Configuration
         DOTNET_VERSION = '6.0'
@@ -14,9 +19,6 @@ pipeline {
         // SonarQube Configuration
         SONARQUBE_URL = 'http://localhost:9000'
         SONAR_PROJECT_KEY = 'your-project-key' // Replace with your actual SonarQube project key
-
-        // Configure JFrog CLI tool in Jenkins Global Tool Configuration
-        jfrog 'jfrog-cli'
 
         // JFrog Configuration
         JFROG_CLI_BUILD_NAME = "${JOB_NAME}"
