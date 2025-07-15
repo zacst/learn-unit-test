@@ -681,98 +681,7 @@ pipeline {
                                         env.DEPENDENCY_VULNERABILITIES = "0"
                                         env.DEPENDENCY_HIGH_CRITICAL = "0"
                                         env.DEPENDENCIES_SCANNED = dependencyCount.toString()
-                                    }
-                                    
-                                    // Create HTML report for better visualization
-                                    def htmlReport = """
-                                    <html>
-                                    <head>
-                                        <title>Dependency Check Report</title>
-                                        <style>
-                                            body { font-family: Arial, sans-serif; margin: 20px; }
-                                            .summary { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-                                            .critical { color: #d32f2f; }
-                                            .high { color: #f57c00; }
-                                            .medium { color: #fbc02d; }
-                                            .low { color: #388e3c; }
-                                            table { border-collapse: collapse; width: 100%; }
-                                            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                                            th { background-color: #f2f2f2; }
-                                        </style>
-                                    </head>
-                                    <body>
-                                        <h1>OWASP Dependency Check Report</h1>
-                                        <div class="summary">
-                                            <h2>Summary</h2>
-                                            <p>Dependencies Scanned: <strong>${dependencyCount}</strong></p>
-                                            <p>Total Vulnerabilities: <strong>${vulnerabilityCount}</strong></p>
-                                            ${severityCounts ? severityCounts.collect { severity, count -> 
-                                                "<p>${severity}: <strong class=\"${severity.toLowerCase()}\">${count}</strong></p>" 
-                                            }.join('') : ''}
-                                        </div>
-                                        
-                                        ${vulnerabilityCount > 0 ? """
-                                        <h2>Vulnerability Details</h2>
-                                        <table>
-                                            <tr><th>Dependency</th><th>Vulnerability</th><th>Severity</th><th>CVSS Score</th><th>Description</th></tr>
-                                            ${report.dependencies?.collect { dep ->
-                                                dep.vulnerabilities?.collect { vuln ->
-                                                    "<tr><td>${dep.fileName}</td><td>${vuln.name}</td><td class=\"${vuln.severity?.toLowerCase()}\">${vuln.severity}</td><td>${vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A'}</td><td>${vuln.description?.take(150)}...</td></tr>"
-                                                }?.join('') ?: ''
-                                            }?.join('') ?: ''}
-                                        </table>
-                                        """ : '<p>No vulnerabilities found.</p>'}
-                                        
-                                        <hr>
-                                        <p><small>Report generated on ${new Date()}</small></p>
-                                    </body>
-                                    </html>
-                                    """
-                                    
-                                    writeFile file: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html", text: htmlReport
-                                    
-                                } else {
-                                    echo "⚠️ JSON report not found, using XML only"
-                                    env.DEPENDENCY_VULNERABILITIES = "UNKNOWN"
-                                }
-                                
-                                // Use recordIssues with XML (if available) for Jenkins integration
-                                if (xmlExists) {
-                                    try {
-                                        echo "📋 Publishing issues to Jenkins using XML report..."
-                                        recordIssues enabledForFailure: true,
-                                                tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
-                                                qualityGates: [
-                                                    [threshold: 1, type: 'TOTAL_HIGH', unstable: true],
-                                                    [threshold: 1, type: 'TOTAL_ERROR', unstable: true]
-                                                ]
-                                        echo "✅ Issues recorded successfully in Jenkins"
-                                    } catch (Exception recordException) {
-                                        echo "⚠️ Failed to record issues with XML: ${recordException.getMessage()}"
-                                        echo "📋 This might be due to XML parsing issues, but JSON analysis above should still be valid"
-                                    }
-                                } else {
-                                    echo "⚠️ XML report not found, skipping recordIssues"
-                                }
-                                
-                                // Archive all reports
-                                archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/dependency-check/*", allowEmptyArchive: true
-                                
-                                // Publish HTML report
-                                try {
-                                    publishHTML([
-                                        allowMissing: false,
-                                        alwaysLinkToLastBuild: true,
-                                        keepAll: true,
-                                        reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
-                                        reportFiles: 'dependency-check-report.html',
-                                        reportName: 'OWASP Dependency Check Report'
-                                    ])
-                                    echo "✅ HTML report published successfully"
-                                } catch (Exception htmlException) {
-                                    echo "⚠️ Failed to publish HTML report: ${htmlException.getMessage()}"
-                                }
-                                
+                                    }                                
                             } catch (Exception e) {
                                 echo "❌ Dependency Check failed: ${e.getMessage()}"
                                 env.DEPENDENCY_VULNERABILITIES = "ERROR"
@@ -1036,6 +945,97 @@ pipeline {
                                 echo "⚠️ Build marked unstable due to dependency vulnerabilities"
                             }
                         }
+
+                        // Create HTML report for better visualization
+                        def htmlReport = """
+                        <html>
+                        <head>
+                            <title>Dependency Check Report</title>
+                            <style>
+                                body { font-family: Arial, sans-serif; margin: 20px; }
+                                .summary { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+                                .critical { color: #d32f2f; }
+                                .high { color: #f57c00; }
+                                .medium { color: #fbc02d; }
+                                .low { color: #388e3c; }
+                                table { border-collapse: collapse; width: 100%; }
+                                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                                th { background-color: #f2f2f2; }
+                            </style>
+                        </head>
+                        <body>
+                            <h1>OWASP Dependency Check Report</h1>
+                            <div class="summary">
+                                <h2>Summary</h2>
+                                <p>Dependencies Scanned: <strong>${dependencyCount}</strong></p>
+                                <p>Total Vulnerabilities: <strong>${vulnerabilityCount}</strong></p>
+                                ${severityCounts ? severityCounts.collect { severity, count -> 
+                                    "<p>${severity}: <strong class=\"${severity.toLowerCase()}\">${count}</strong></p>" 
+                                }.join('') : ''}
+                            </div>
+                            
+                            ${vulnerabilityCount > 0 ? """
+                            <h2>Vulnerability Details</h2>
+                            <table>
+                                <tr><th>Dependency</th><th>Vulnerability</th><th>Severity</th><th>CVSS Score</th><th>Description</th></tr>
+                                ${report.dependencies?.collect { dep ->
+                                    dep.vulnerabilities?.collect { vuln ->
+                                        "<tr><td>${dep.fileName}</td><td>${vuln.name}</td><td class=\"${vuln.severity?.toLowerCase()}\">${vuln.severity}</td><td>${vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A'}</td><td>${vuln.description?.take(150)}...</td></tr>"
+                                    }?.join('') ?: ''
+                                }?.join('') ?: ''}
+                            </table>
+                            """ : '<p>No vulnerabilities found.</p>'}
+                            
+                            <hr>
+                            <p><small>Report generated on ${new Date()}</small></p>
+                        </body>
+                        </html>
+                        """
+                        
+                        writeFile file: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html", text: htmlReport
+                        
+                    } else {
+                        echo "⚠️ JSON report not found, using XML only"
+                        env.DEPENDENCY_VULNERABILITIES = "UNKNOWN"
+                    }
+                    
+                    // Use recordIssues with XML (if available) for Jenkins integration
+                    if (xmlExists) {
+                        try {
+                            echo "📋 Publishing issues to Jenkins using XML report..."
+                            recordIssues enabledForFailure: true,
+                                    tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
+                                    qualityGates: [
+                                        [threshold: 1, type: 'TOTAL_HIGH', unstable: true],
+                                        [threshold: 1, type: 'TOTAL_ERROR', unstable: true]
+                                    ]
+                            echo "✅ Issues recorded successfully in Jenkins"
+                        } catch (Exception recordException) {
+                            echo "⚠️ Failed to record issues with XML: ${recordException.getMessage()}"
+                            echo "📋 This might be due to XML parsing issues, but JSON analysis above should still be valid"
+                        }
+                    } else {
+                        echo "⚠️ XML report not found, skipping recordIssues"
+                    }
+                    
+                    // Archive all reports
+                    archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/dependency-check/*", allowEmptyArchive: true
+                    
+                    // Publish HTML report
+                    try {
+                        publishHTML([
+                            allowMissing: false,
+                            alwaysLinkToLastBuild: true,
+                            keepAll: true,
+                            reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
+                            reportFiles: 'dependency-check-report.html',
+                            reportName: 'OWASP Dependency Check Report'
+                        ])
+                        echo "✅ HTML report published successfully"
+                    } catch (Exception htmlException) {
+                        echo "⚠️ Failed to publish HTML report: ${htmlException.getMessage()}"
+                    }
+
                     }
                 }
             }
