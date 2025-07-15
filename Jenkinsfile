@@ -595,10 +595,11 @@ pipeline {
                                         unzip -q dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip
                                     fi
                                     
-                                    # Run dependency check on project files
+                                    # Run dependency check - Generate both JSON and XML
                                     echo "🔍 Scanning for vulnerable dependencies..."
                                     ./dependency-check/bin/dependency-check.sh \\
                                         --scan . \\
+                                        --format JSON \\
                                         --format XML \\
                                         --out ${SECURITY_REPORTS_DIR}/dependency-check \\
                                         --project "\${JOB_NAME}" \\
@@ -615,46 +616,167 @@ pipeline {
                                         --suppression dependency-check-suppressions.xml || true
                                 """
                                 
-                                // Check what was actually scanned
-                                sh """
-                                    echo "📋 Dependency Check Log (last 50 lines):"
-                                    if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check.log" ]; then
-                                        tail -50 "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check.log"
-                                    else
-                                        echo "Log file not found"
-                                    fi
-                                """
-                                
-                                // Show XML report size and sample content
-                                sh """
-                                    echo "📄 XML Report Info:"
-                                    if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml" ]; then
-                                        echo "File size: \$(wc -c < ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml) bytes"
-                                        echo "Dependencies scanned: \$(grep -c '<dependency' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml || echo 0)"
-                                        echo "Vulnerabilities found: \$(grep -c '<vulnerability' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml || echo 0)"
-                                    else
-                                        echo "XML report not found"
-                                    fi
-                                """
-                                
-                                // Record issues using XML format
+                                // Parse JSON for detailed analysis (this is reliable)
+                                def jsonExists = fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")
                                 def xmlExists = fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")
                                 
-                                if (xmlExists) {
-                                    recordIssues enabledForFailure: true,
-                                            tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
-                                            qualityGates: [
-                                                [threshold: 1, type: 'TOTAL_HIGH', unstable: true],
-                                                [threshold: 1, type: 'TOTAL_ERROR', unstable: true]
-                                            ]
-                                    echo "✅ Dependency check results published to Jenkins UI"
+                                if (jsonExists) {
+                                    def dependencyCheckResults = readFile("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")
+                                    def jsonSlurper = new groovy.json.JsonSlurper()
+                                    def report = jsonSlurper.parseText(dependencyCheckResults)
+                                    
+                                    // Count total vulnerabilities
+                                    def vulnerabilityCount = report.dependencies?.sum { dep -> 
+                                        dep.vulnerabilities?.size() ?: 0 
+                                    } ?: 0
+                                    
+                                    def dependencyCount = report.dependencies?.size() ?: 0
+                                    
+                                    echo "📊 Dependency Check Results:"
+                                    echo "   📦 Dependencies scanned: ${dependencyCount}"
+                                    echo "   🚨 Vulnerabilities found: ${vulnerabilityCount}"
+                                    
+                                    // Detailed vulnerability breakdown by severity
+                                    if (vulnerabilityCount > 0) {
+                                        def severityCounts = [:]
+                                        def highCriticalCount = 0
+                                        
+                                        report.dependencies?.each { dep ->
+                                            dep.vulnerabilities?.each { vuln ->
+                                                def severity = vuln.severity ?: 'UNKNOWN'
+                                                severityCounts[severity] = (severityCounts[severity] ?: 0) + 1
+                                                
+                                                if (severity?.toUpperCase() in ['HIGH', 'CRITICAL']) {
+                                                    highCriticalCount++
+                                                }
+                                            }
+                                        }
+                                        
+                                        echo "📈 Vulnerability breakdown by severity:"
+                                        severityCounts.each { severity, count ->
+                                            echo "   ${severity}: ${count}"
+                                        }
+                                        
+                                        // List first 10 vulnerabilities for visibility
+                                        echo "🔍 First 10 vulnerabilities found:"
+                                        def vulnCounter = 0
+                                        report.dependencies?.each { dep ->
+                                            if (vulnCounter >= 10) return
+                                            dep.vulnerabilities?.each { vuln ->
+                                                if (vulnCounter >= 10) return
+                                                vulnCounter++
+                                                echo "   ${vulnCounter}. ${vuln.name} (${vuln.severity}) in ${dep.fileName}"
+                                                if (vuln.description) {
+                                                    echo "      Description: ${vuln.description.take(100)}..."
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Set environment variables
+                                        env.DEPENDENCY_VULNERABILITIES = vulnerabilityCount.toString()
+                                        env.DEPENDENCY_HIGH_CRITICAL = highCriticalCount.toString()
+                                        env.DEPENDENCIES_SCANNED = dependencyCount.toString()
+                                    } else {
+                                        echo "✅ No vulnerabilities found - all dependencies are secure"
+                                        env.DEPENDENCY_VULNERABILITIES = "0"
+                                        env.DEPENDENCY_HIGH_CRITICAL = "0"
+                                        env.DEPENDENCIES_SCANNED = dependencyCount.toString()
+                                    }
+                                    
+                                    // Create HTML report for better visualization
+                                    def htmlReport = """
+                                    <html>
+                                    <head>
+                                        <title>Dependency Check Report</title>
+                                        <style>
+                                            body { font-family: Arial, sans-serif; margin: 20px; }
+                                            .summary { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+                                            .critical { color: #d32f2f; }
+                                            .high { color: #f57c00; }
+                                            .medium { color: #fbc02d; }
+                                            .low { color: #388e3c; }
+                                            table { border-collapse: collapse; width: 100%; }
+                                            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                                            th { background-color: #f2f2f2; }
+                                        </style>
+                                    </head>
+                                    <body>
+                                        <h1>OWASP Dependency Check Report</h1>
+                                        <div class="summary">
+                                            <h2>Summary</h2>
+                                            <p>Dependencies Scanned: <strong>${dependencyCount}</strong></p>
+                                            <p>Total Vulnerabilities: <strong>${vulnerabilityCount}</strong></p>
+                                            ${severityCounts ? severityCounts.collect { severity, count -> 
+                                                "<p>${severity}: <strong class=\"${severity.toLowerCase()}\">${count}</strong></p>" 
+                                            }.join('') : ''}
+                                        </div>
+                                        
+                                        ${vulnerabilityCount > 0 ? """
+                                        <h2>Vulnerability Details</h2>
+                                        <table>
+                                            <tr><th>Dependency</th><th>Vulnerability</th><th>Severity</th><th>CVSS Score</th><th>Description</th></tr>
+                                            ${report.dependencies?.collect { dep ->
+                                                dep.vulnerabilities?.collect { vuln ->
+                                                    "<tr><td>${dep.fileName}</td><td>${vuln.name}</td><td class=\"${vuln.severity?.toLowerCase()}\">${vuln.severity}</td><td>${vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A'}</td><td>${vuln.description?.take(150)}...</td></tr>"
+                                                }?.join('') ?: ''
+                                            }?.join('') ?: ''}
+                                        </table>
+                                        """ : '<p>No vulnerabilities found.</p>'}
+                                        
+                                        <hr>
+                                        <p><small>Report generated on ${new Date()}</small></p>
+                                    </body>
+                                    </html>
+                                    """
+                                    
+                                    writeFile file: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html", text: htmlReport
+                                    
                                 } else {
-                                    echo "❌ XML report not found"
+                                    echo "⚠️ JSON report not found, using XML only"
+                                    env.DEPENDENCY_VULNERABILITIES = "UNKNOWN"
+                                }
+                                
+                                // Use recordIssues with XML (if available) for Jenkins integration
+                                if (xmlExists) {
+                                    try {
+                                        echo "📋 Publishing issues to Jenkins using XML report..."
+                                        recordIssues enabledForFailure: true,
+                                                tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
+                                                qualityGates: [
+                                                    [threshold: 1, type: 'TOTAL_HIGH', unstable: true],
+                                                    [threshold: 1, type: 'TOTAL_ERROR', unstable: true]
+                                                ]
+                                        echo "✅ Issues recorded successfully in Jenkins"
+                                    } catch (Exception recordException) {
+                                        echo "⚠️ Failed to record issues with XML: ${recordException.getMessage()}"
+                                        echo "📋 This might be due to XML parsing issues, but JSON analysis above should still be valid"
+                                    }
+                                } else {
+                                    echo "⚠️ XML report not found, skipping recordIssues"
+                                }
+                                
+                                // Archive all reports
+                                archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/dependency-check/*", allowEmptyArchive: true
+                                
+                                // Publish HTML report
+                                try {
+                                    publishHTML([
+                                        allowMissing: false,
+                                        alwaysLinkToLastBuild: true,
+                                        keepAll: true,
+                                        reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
+                                        reportFiles: 'dependency-check-report.html',
+                                        reportName: 'OWASP Dependency Check Report'
+                                    ])
+                                    echo "✅ HTML report published successfully"
+                                } catch (Exception htmlException) {
+                                    echo "⚠️ Failed to publish HTML report: ${htmlException.getMessage()}"
                                 }
                                 
                             } catch (Exception e) {
                                 echo "❌ Dependency Check failed: ${e.getMessage()}"
                                 env.DEPENDENCY_VULNERABILITIES = "ERROR"
+                                currentBuild.result = 'UNSTABLE'
                             }
                         }
                     }
