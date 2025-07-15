@@ -846,15 +846,30 @@ pipeline {
 
                         // Modern approach of OWASP Dependency Check using recordIssues
                         try {
-                            if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")) {
+                            def xmlExists = fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")
+                            def jsonExists = fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")
+                            
+                            if (xmlExists && jsonExists) {
                                 recordIssues enabledForFailure: true,
                                         tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
                                         qualityGates: [
                                             [threshold: 1, type: 'TOTAL_HIGH', unstable: true],
                                             [threshold: 1, type: 'TOTAL_ERROR', unstable: true]
                                         ]
+                                echo "✅ Dependency check results published to Jenkins UI (XML: ✓, JSON: ✓)"
+                            } else {
+                                echo "⚠️ Missing dependency check files - XML: ${xmlExists ? '✓' : '✗'}, JSON: ${jsonExists ? '✓' : '✗'}"
+                                if (xmlExists) {
+                                    // Still try to record issues even if JSON is missing
+                                    recordIssues enabledForFailure: true,
+                                            tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
+                                            qualityGates: [
+                                                [threshold: 1, type: 'TOTAL_HIGH', unstable: true],
+                                                [threshold: 1, type: 'TOTAL_ERROR', unstable: true]
+                                            ]
+                                    echo "✅ Dependency check results published to Jenkins UI (XML only)"
+                                }
                             }
-                            echo "✅ Dependency check results published to Jenkins UI"
                         } catch (Exception e) {
                             echo "⚠️ Could not publish dependency check results: ${e.getMessage()}"
                         }
