@@ -27,6 +27,8 @@ pipeline {
         ARTIFACTORY_REPO_BINARIES = 'libs-release-local'
         ARTIFACTORY_REPO_NUGET = 'nuget-local'
         ARTIFACTORY_REPO_REPORTS = 'reports-local'
+
+        dotnetVerbosity = 'n' // Default verbosity for dotnet commands
     }
 
     options {
@@ -128,37 +130,167 @@ pipeline {
             steps {
                 script {
                     echo "🔍 Discovering NUnit test projects..."
+                    
                     def detectTestFramework = { projectPath ->
-                        def projectContent = readFile(projectPath)
-                        if (projectContent.contains('Microsoft.NET.Test.Sdk') && projectContent.contains('NUnit')) {
-                            return 'NUNIT'
+                        try {
+                            def projectContent = readFile(projectPath)
+                            
+                            // Parse XML properly to check for NUnit packages
+                            def packageRefs = []
+                            def packageRefPattern = /<PackageReference\s+Include="([^"]+)"/
+                            def matcher = projectContent =~ packageRefPattern
+                            matcher.each { match ->
+                                packageRefs.add(match[1])
+                            }
+                            
+                            // Check for NUnit-related packages
+                            def nunitPackages = ['NUnit', 'NUnit3TestAdapter', 'Microsoft.NET.Test.Sdk']
+                            def hasTestSdk = packageRefs.any { it.contains('Microsoft.NET.Test.Sdk') }
+                            def hasNUnit = packageRefs.any { pkg -> 
+                                nunitPackages.any { nunitPkg -> pkg.contains(nunitPkg) }
+                            }
+                            
+                            if (hasTestSdk && hasNUnit) {
+                                echo "✅ NUnit project detected: ${projectPath}"
+                                return 'NUNIT'
+                            }
+                            
+                            // Also check for legacy packages.config references
+                            if (projectContent.contains('packages.config')) {
+                                def packagesConfigPath = projectPath.replace('.csproj', '/packages.config')
+                                if (fileExists(packagesConfigPath)) {
+                                    def packagesContent = readFile(packagesConfigPath)
+                                    if (packagesContent.contains('id="NUnit"')) {
+                                        echo "✅ Legacy NUnit project detected: ${projectPath}"
+                                        return 'NUNIT'
+                                    }
+                                }
+                            }
+                            
+                            return 'UNKNOWN'
+                        } catch (Exception e) {
+                            echo "⚠️  Error reading project file ${projectPath}: ${e.message}"
+                            return 'ERROR'
                         }
-                        return 'UNKNOWN'
                     }
 
-                    def allTestProjects = sh(
-                        script: "find . -name '*.csproj' -path '*/Test*' -o -name '*.csproj' -path '*/*Test*' | head -50",
-                        returnStdout: true
-                    ).trim().split('\n').findAll { it.trim() }
-
-                    def nunitProjectsList = []
-                    if (allTestProjects && allTestProjects[0]) {
-                        allTestProjects.each { project ->
-                            if (fileExists(project)) {
-                                def framework = detectTestFramework(project)
-                                if (framework == 'NUNIT') {
-                                    nunitProjectsList.add(project)
+                    def findAllTestProjects = {
+                        try {
+                            // Multiple search patterns for different naming conventions
+                            def searchPatterns = [
+                                "find . -name '*.csproj' -path '*/Test*'",
+                                "find . -name '*.csproj' -path '*/*Test*'", 
+                                "find . -name '*.csproj' -path '*/*Tests*'",
+                                "find . -name '*.csproj' -path '*/Tests/*'",
+                                "find . -name '*.Test.csproj'",
+                                "find . -name '*.Tests.csproj'",
+                                "find . -name '*.UnitTests.csproj'",
+                                "find . -name '*.IntegrationTests.csproj'"
+                            ]
+                            
+                            def allProjects = []
+                            searchPatterns.each { pattern ->
+                                def result = sh(
+                                    script: "${pattern} 2>/dev/null || true",
+                                    returnStdout: true
+                                ).trim()
+                                
+                                if (result) {
+                                    def projects = result.split('\n').findAll { it.trim() }
+                                    allProjects.addAll(projects)
                                 }
+                            }
+                            
+                            // Remove duplicates and limit results
+                            return allProjects.unique().take(100)
+                            
+                        } catch (Exception e) {
+                            echo "⚠️  Error searching for test projects: ${e.message}"
+                            
+                            // Fallback to simple find
+                            try {
+                                def result = sh(
+                                    script: "find . -name '*.csproj' | head -50",
+                                    returnStdout: true
+                                ).trim()
+                                return result ? result.split('\n').findAll { it.trim() } : []
+                            } catch (Exception fallbackError) {
+                                echo "❌ Fallback search also failed: ${fallbackError.message}"
+                                return []
                             }
                         }
                     }
 
+                    // Discover test projects
+                    def allTestProjects = findAllTestProjects()
+                    echo "📁 Found ${allTestProjects.size()} potential test project(s)"
+                    
+                    def nunitProjectsList = []
+                    def skippedProjects = []
+                    def errorProjects = []
+                    
+                    if (allTestProjects) {
+                        allTestProjects.each { project ->
+                            if (fileExists(project)) {
+                                def framework = detectTestFramework(project)
+                                switch(framework) {
+                                    case 'NUNIT':
+                                        nunitProjectsList.add(project)
+                                        break
+                                    case 'ERROR':
+                                        errorProjects.add(project)
+                                        break
+                                    default:
+                                        skippedProjects.add(project)
+                                }
+                            } else {
+                                echo "⚠️  Project file not found: ${project}"
+                            }
+                        }
+                    }
+
+                    // Logging results
+                    echo "📊 Test project discovery results:"
+                    echo "  ✅ NUnit projects: ${nunitProjectsList.size()}"
+                    echo "  ⏭️  Skipped projects: ${skippedProjects.size()}"
+                    echo "  ❌ Error projects: ${errorProjects.size()}"
+                    
+                    if (nunitProjectsList) {
+                        echo "📋 NUnit projects found:"
+                        nunitProjectsList.each { project ->
+                            echo "  - ${project}"
+                        }
+                    }
+
+                    // Configurable fallback
                     if (nunitProjectsList.isEmpty()) {
-                        nunitProjectsList = ['./csharp-nunit/Calculator.Tests/Calculator.Tests.csproj']
+                        def fallbackProjects = env.FALLBACK_NUNIT_PROJECTS ?: './csharp-nunit/Calculator.Tests/Calculator.Tests.csproj'
+                        echo "⚠️  No NUnit projects discovered, using fallback: ${fallbackProjects}"
+                        nunitProjectsList = fallbackProjects.split(',').collect { it.trim() }
+                        
+                        // Verify fallback projects exist
+                        nunitProjectsList = nunitProjectsList.findAll { project ->
+                            if (fileExists(project)) {
+                                return true
+                            } else {
+                                echo "❌ Fallback project not found: ${project}"
+                                return false
+                            }
+                        }
+                    }
+
+                    // Validate final list
+                    if (nunitProjectsList.isEmpty()) {
+                        error("❌ No valid NUnit test projects found and no valid fallback projects available")
                     }
 
                     env.nunitProjects = nunitProjectsList.join(',')
-                    echo "📊 Found ${nunitProjectsList.size()} NUnit project(s)"
+                    env.nunitProjectCount = nunitProjectsList.size().toString()
+                    
+                    echo "🎯 Final NUnit projects (${nunitProjectsList.size()}):"
+                    nunitProjectsList.each { project ->
+                        echo "  → ${project}"
+                    }
                 }
             }
         }
