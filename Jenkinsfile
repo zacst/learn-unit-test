@@ -843,6 +843,28 @@ pipeline {
                         } catch (Exception e) {
                             echo "⚠️ Could not archive security reports: ${e.getMessage()}"
                         }
+
+                        // Uses OWASP Dependency Check Plugin
+                        dependencyCheckPublisher(
+                            pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml",
+                            canComputeNew: false,
+                            defaultEncoding: '',
+                            healthy: '',
+                            unHealthy: '',
+                            thresholdLimit: 'high',
+                            pluginName: '[DependencyCheck] ',
+                            shouldDetectModules: false,
+                            unstableTotalAll: '0',
+                            unstableTotalHigh: '0',
+                            unstableTotalLow: '0',
+                            unstableTotalMedium: '0',
+                            unstableTotalNormal: '0',
+                            failedTotalAll: '1',
+                            failedTotalHigh: '1',
+                            failedTotalLow: '0',
+                            failedTotalMedium: '0',
+                            failedTotalNormal: '0'
+                        )
                         
                         // Publish security test results
                         try {
