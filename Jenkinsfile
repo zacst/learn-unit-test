@@ -492,6 +492,15 @@ pipeline {
                             }
                         }
 
+                        // Publish test results to Jenkins UI
+                        try {
+                            // For .trx files (MSTest format)
+                            publishTestResults testResultsPattern: "${TEST_RESULTS_DIR}/*.trx"
+                            echo "✅ Test results published to Jenkins UI"
+                        } catch (Exception e) {
+                            echo "⚠️ Could not publish test results: ${e.getMessage()}"
+                        }
+
                         // Archive coverage reports
                         if (params.GENERATE_COVERAGE && fileExists("${COVERAGE_REPORTS_DIR}")) {
                             try {
