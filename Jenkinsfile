@@ -501,7 +501,7 @@ pipeline {
                 always {
                     script {
                         echo "📊 Archiving test results and artifacts..."
-                        
+
                         // Archive test results
                         if (fileExists("${TEST_RESULTS_DIR}")) {
                             try {
@@ -514,33 +514,23 @@ pipeline {
 
                         // Publish test results to Jenkins UI
                         try {
-                            // Use mstest for .trx files (Visual Studio Test Results)
                             def testResultsFound = sh(
                                 script: "find ${TEST_RESULTS_DIR} -name '*.trx' -type f | head -1",
                                 returnStdout: true
                             ).trim()
-                            
+
                             if (testResultsFound) {
-                                publishTestResults([
-                                    testResultsPattern: "${TEST_RESULTS_DIR}/*.trx",
-                                    testDataPublishers: [
-                                        [$class: 'StabilityTestDataPublisher'],
-                                        [$class: 'TestResultPublisher']
-                                    ]
-                                ])
+                                // Use the 'nunit' step for .trx files, which is a common format for NUnit.
+                                nunit testResultsPattern: "${TEST_RESULTS_DIR}/*.trx",
+                                    failIfNoResults: false,
+                                    keepLongStdio: true,
+                                    allowEmptyResults: true
                                 echo "✅ Test results published to Jenkins UI"
                             } else {
                                 echo "ℹ️ No test result files found to publish"
                             }
                         } catch (Exception e) {
                             echo "⚠️ Could not publish test results: ${e.getMessage()}"
-                            // Alternative approach using step directly
-                            try {
-                                step([$class: 'MSTestPublisher', testResultsFile: "${TEST_RESULTS_DIR}/*.trx"])
-                                echo "✅ Test results published using MSTestPublisher"
-                            } catch (Exception altE) {
-                                echo "⚠️ Alternative test publisher also failed: ${altE.getMessage()}"
-                            }
                         }
 
                         // Archive coverage reports
@@ -550,13 +540,13 @@ pipeline {
                                 def coberturaFile = "${COVERAGE_REPORTS_DIR}/dotnet/Cobertura.xml"
                                 if (fileExists(coberturaFile)) {
                                     recordCoverage tools: [[parser: 'COBERTURA', pattern: coberturaFile]],
-                                        sourceCodeRetention: 'EVERY_BUILD'
+                                                sourceCodeRetention: 'EVERY_BUILD'
                                 }
-                                
+
                                 // Archive coverage artifacts
                                 archiveArtifacts artifacts: "${COVERAGE_REPORTS_DIR}/**",
-                                    allowEmptyArchive: true,
-                                    fingerprint: true
+                                                allowEmptyArchive: true,
+                                                fingerprint: true
                                 echo "✅ Coverage reports archived"
                             } catch (Exception e) {
                                 echo "⚠️ Could not archive coverage reports: ${e.getMessage()}"
