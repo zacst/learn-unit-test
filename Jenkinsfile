@@ -32,7 +32,7 @@ pipeline {
 
         // Security Check Configuration
         SECURITY_REPORTS_DIR = 'security-reports'
-        DEPENDENCY_CHECK_VERSION = '8.4.0'
+        DEPENDENCY_CHECK_VERSION = '9.2.0'
         SEMGREP_TIMEOUT = '300'
     }
 
