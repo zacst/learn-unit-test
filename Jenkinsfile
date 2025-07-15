@@ -520,11 +520,10 @@ pipeline {
                             ).trim()
 
                             if (testResultsFound) {
-                                // Use the 'nunit' step for .trx files, which is a common format for NUnit.
-                                nunit testResultsPattern: "${TEST_RESULTS_DIR}/*.trx",
-                                    failIfNoResults: false,
-                                    keepLongStdio: true,
-                                    allowEmptyResults: true
+                                // Use the 'mstest' step for .trx files.
+                                mstest testResultsFile: "${TEST_RESULTS_DIR}/*.trx", 
+                                    failOnError: false, 
+                                    keepLongStdio: true
                                 echo "✅ Test results published to Jenkins UI"
                             } else {
                                 echo "ℹ️ No test result files found to publish"
