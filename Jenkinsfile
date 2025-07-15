@@ -602,7 +602,7 @@ pipeline {
                                         --format XML \\
                                         --out ${SECURITY_REPORTS_DIR}/dependency-check \\
                                         --project "\${JOB_NAME}" \\
-                                        --failOnCVSS 7 \\
+                                        --failOnCVSS 0 \\
                                         --enableRetired \\
                                         --enableExperimental \\
                                         --log ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check.log \\
@@ -615,14 +615,42 @@ pipeline {
                                         --suppression dependency-check-suppressions.xml || true
                                 """
                                 
-                                // Parse results
-                                def xmlContent = readFile("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")
-                                def vulnerabilityCount = (xmlContent =~ /<vulnerability[^>]*>/).size()
+                                // Check what was actually scanned
+                                sh """
+                                    echo "📋 Dependency Check Log (last 50 lines):"
+                                    if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check.log" ]; then
+                                        tail -50 "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check.log"
+                                    else
+                                        echo "Log file not found"
+                                    fi
+                                """
                                 
-                                echo "📊 Dependency Check Results: ${vulnerabilityCount} vulnerabilities found"
+                                // Show XML report size and sample content
+                                sh """
+                                    echo "📄 XML Report Info:"
+                                    if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml" ]; then
+                                        echo "File size: \$(wc -c < ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml) bytes"
+                                        echo "Dependencies scanned: \$(grep -c '<dependency' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml || echo 0)"
+                                        echo "Vulnerabilities found: \$(grep -c '<vulnerability' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml || echo 0)"
+                                    else
+                                        echo "XML report not found"
+                                    fi
+                                """
                                 
-                                // Set environment variable for later use
-                                env.DEPENDENCY_VULNERABILITIES = vulnerabilityCount.toString()
+                                // Record issues using XML format
+                                def xmlExists = fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")
+                                
+                                if (xmlExists) {
+                                    recordIssues enabledForFailure: true,
+                                            tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
+                                            qualityGates: [
+                                                [threshold: 1, type: 'TOTAL_HIGH', unstable: true],
+                                                [threshold: 1, type: 'TOTAL_ERROR', unstable: true]
+                                            ]
+                                    echo "✅ Dependency check results published to Jenkins UI"
+                                } else {
+                                    echo "❌ XML report not found"
+                                }
                                 
                             } catch (Exception e) {
                                 echo "❌ Dependency Check failed: ${e.getMessage()}"
@@ -835,22 +863,6 @@ pipeline {
                             echo "✅ Security reports archived"
                         } catch (Exception e) {
                             echo "⚠️ Could not archive security reports: ${e.getMessage()}"
-                        }
-
-                        // Modern approach of OWASP Dependency Check using recordIssues
-                        try {
-                            def xmlExists = fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")
-                            
-                            // Record issues using XML format
-                            recordIssues enabledForFailure: true,
-                                    tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
-                                    qualityGates: [
-                                        [threshold: 1, type: 'TOTAL_HIGH', unstable: true],
-                                        [threshold: 1, type: 'TOTAL_ERROR', unstable: true]
-                                    ]
-                            echo "✅ Dependency check results published to Jenkins UI"
-                        } catch (Exception e) {
-                            echo "⚠️ Could not publish dependency check results: ${e.getMessage()}"
                         }
                         
                         // Publish security test results
