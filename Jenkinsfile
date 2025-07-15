@@ -514,11 +514,33 @@ pipeline {
 
                         // Publish test results to Jenkins UI
                         try {
-                            // For .trx files (MSTest format)
-                            publishTestResults testResultsPattern: "${TEST_RESULTS_DIR}/*.trx"
-                            echo "✅ Test results published to Jenkins UI"
+                            // Use mstest for .trx files (Visual Studio Test Results)
+                            def testResultsFound = sh(
+                                script: "find ${TEST_RESULTS_DIR} -name '*.trx' -type f | head -1",
+                                returnStdout: true
+                            ).trim()
+                            
+                            if (testResultsFound) {
+                                publishTestResults([
+                                    testResultsPattern: "${TEST_RESULTS_DIR}/*.trx",
+                                    testDataPublishers: [
+                                        [$class: 'StabilityTestDataPublisher'],
+                                        [$class: 'TestResultPublisher']
+                                    ]
+                                ])
+                                echo "✅ Test results published to Jenkins UI"
+                            } else {
+                                echo "ℹ️ No test result files found to publish"
+                            }
                         } catch (Exception e) {
                             echo "⚠️ Could not publish test results: ${e.getMessage()}"
+                            // Alternative approach using step directly
+                            try {
+                                step([$class: 'MSTestPublisher', testResultsFile: "${TEST_RESULTS_DIR}/*.trx"])
+                                echo "✅ Test results published using MSTestPublisher"
+                            } catch (Exception altE) {
+                                echo "⚠️ Alternative test publisher also failed: ${altE.getMessage()}"
+                            }
                         }
 
                         // Archive coverage reports
