@@ -616,13 +616,8 @@ pipeline {
                                 """
                                 
                                 // Parse results
-                                def dependencyCheckResults = readFile("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")
-                                def jsonSlurper = new groovy.json.JsonSlurper()
-                                def report = jsonSlurper.parseText(dependencyCheckResults)
-                                
-                                def vulnerabilityCount = report.dependencies?.sum { dep -> 
-                                    dep.vulnerabilities?.size() ?: 0 
-                                } ?: 0
+                                def xmlContent = readFile("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")
+                                def vulnerabilityCount = (xmlContent =~ /<vulnerability[^>]*>/).size()
                                 
                                 echo "📊 Dependency Check Results: ${vulnerabilityCount} vulnerabilities found"
                                 
