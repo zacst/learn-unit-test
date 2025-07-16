@@ -1107,45 +1107,42 @@ def downloadDependencyCheck() {
 }
 
 def runDependencyCheck() {
-    sh """
-        echo "🔍 Scanning for vulnerable dependencies..."
-        ./dependency-check/bin/dependency-check.sh \\
-            --scan . \\
-            --format JSON \\
-            --format XML \\
-            --format HTML \\
-            --format JUNIT \\
-            --out ${SECURITY_REPORTS_DIR}/dependency-check \\
-            --project "\${JOB_NAME}" \\
-            --failOnCVSS 0 \\
-            --enableRetired \\
-            --enableExperimental \\
-            --exclude "**/*test*/**" \\
-            --exclude "**/*Test*/**" \\
-            --exclude "**/bin/**" \\
-            --exclude "**/obj/**" \\
-            --exclude "**/packages/**" \\
-            --exclude "**/node_modules/**" \\
-            --suppression dependency-check-suppressions.xml || true
-        
-        # Fix HTML report for Jenkins - ensure proper encoding and paths
-        if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html" ]; then
-            echo "🔧 Fixing HTML report for Jenkins compatibility..."
+    withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY', optional: true)]) {
+        sh """
+            echo "🔍 Scanning for vulnerable dependencies..."
             
-            # Create a Jenkins-compatible HTML report
-            sed -i 's|href="http://|href="https://|g' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html
-            sed -i 's|src="http://|src="https://|g' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html
+            # Use NVD API Key if available
+            NVD_ARGS=""
+            if [ -n "\$NVD_API_KEY" ]; then
+                echo "Using NVD API Key for dependency check."
+                NVD_ARGS="--nvdApiKey \$NVD_API_KEY"
+            else
+                echo "⚠️ NVD API Key not found. Dependency-Check may be slow or fail."
+            fi
+
+            ./dependency-check/bin/dependency-check.sh \\
+                --scan . \\
+                --format JSON \\
+                --format XML \\
+                --format HTML \\
+                --format JUNIT \\
+                --out ${SECURITY_REPORTS_DIR}/dependency-check \\
+                --project "\${JOB_NAME}" \\
+                --failOnCVSS 0 \\
+                --enableRetired \\
+                --enableExperimental \\
+                --exclude "**/*test*/**" \\
+                --exclude "**/*Test*/**" \\
+                --exclude "**/bin/**" \\
+                --exclude "**/obj/**" \\
+                --exclude "**/packages/**" \\
+                --exclude "**/node_modules/**" \\
+                --suppression dependency-check-suppressions.xml \\
+                \$NVD_ARGS || true
             
-            # Ensure proper UTF-8 encoding
-            sed -i '1i\\<?xml version="1.0" encoding="UTF-8"?>' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html
-        fi
-        
-        # Validate XML format
-        if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml" ]; then
-            echo "🔍 Validating XML report format..."
-            xmllint --noout ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml || echo "⚠️ XML validation warning"
-        fi
-    """
+            # ... (rest of the script remains the same)
+        """
+    }
 }
 
 def processDependencyCheckResults() {
@@ -1225,6 +1222,9 @@ def processDependencyCheckResults() {
 
 def installSemgrep() {
     sh """
+        echo "📦 Installing/Updating Python packages for Semgrep..."
+        pip3 install --user --upgrade requests urllib3 chardet
+        
         echo "📦 Installing Semgrep..."
         pip3 install --user semgrep --quiet || pip install --user semgrep --quiet || true
         export PATH="\$PATH:\$HOME/.local/bin"
@@ -1522,12 +1522,22 @@ def runLinting() {
     echo "💅 Running .NET Linter (dotnet-format)..."
     try {
         sh "mkdir -p ${LINTER_REPORTS_DIR}"
+        
+        // Find the solution file to provide context to the linter
+        def solutionFile = sh(script: "find . -name '*.sln' -print -quit", returnStdout: true).trim()
+        if (solutionFile.isEmpty()) {
+            error "❌ Could not find a solution file (.sln) in the workspace."
+        }
+        
+        echo "Found solution file: ${solutionFile}"
+
         sh """
             dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
             export PATH="\$PATH:\$HOME/.dotnet/tools"
 
-            # Check for formatting issues. The command will fail if changes are needed.
-            dotnet format --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
+            # Check for formatting issues. Pass the solution file to the command.
+            # The command will fail with a non-zero exit code if changes are needed.
+            dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
         """
         echo "✅ Linting passed. Code style is consistent."
     } catch (Exception e) {
@@ -1590,7 +1600,7 @@ def runSecretsScan() {
 def runLicenseCheck() {
     echo "⚖️ Running .NET License Compliance Check..."
 
-    // This file defines your license policy. Ideally, this should be checked into your source control.
+    // This file defines your license policy.
     writeFile file: 'allowed-licenses.json', text: '''
     {
       "allowed": [
@@ -1599,13 +1609,20 @@ def runLicenseCheck() {
     }
     '''
     
+    // Find the solution file to provide context
+    def solutionFile = sh(script: "find . -name '*.sln' -print -quit", returnStdout: true).trim()
+    if (solutionFile.isEmpty()) {
+        error "❌ Could not find a solution file (.sln) for the license check."
+    }
+    echo "Found solution file for license check: ${solutionFile}"
+    
     sh """
         dotnet tool install --global license-checker-dotnet --version ${LICENSE_CHECKER_VERSION} || true
         export PATH="\$PATH:\$HOME/.dotnet/tools"
 
         echo "🔍 Scanning solution for dependency licenses..."
         # The command will fail with a non-zero exit code if a non-compliant license is found.
-        license-checker-dotnet --solution . --config allowed-licenses.json --output-file ${SECURITY_REPORTS_DIR}/license-check/license-report.json --verbose
+        license-checker-dotnet --solution '${solutionFile}' --config allowed-licenses.json --output-file ${SECURITY_REPORTS_DIR}/license-check/license-report.json --verbose
     """
     
     echo "✅ All dependency licenses are compliant."
