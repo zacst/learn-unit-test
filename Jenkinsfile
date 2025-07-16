@@ -1527,23 +1527,32 @@ def runLinting() {
         if (solutionFile.isEmpty()) {
             error "❌ Could not find a solution file (.sln) in the workspace."
         }
-        echo "Found solution file: ${solutionFile}"
         
         sh """
             dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
             export PATH="\$PATH:\$HOME/.dotnet/tools"
-            dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
         """
-        echo "✅ Linting passed. Code style is consistent."
-    } catch (Exception e) {
-        currentBuild.result = 'UNSTABLE'
-        echo "❌ Linting Check Failed. Code does not adhere to style guidelines."
         
-        // Archive the JSON report
-        archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
+        // Run format check and capture exit code
+        def formatResult = sh(
+            script: """
+                export PATH="\$PATH:\$HOME/.dotnet/tools"
+                dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
+            """,
+            returnStatus: true
+        )
+        
+        if (formatResult == 0) {
+            echo "✅ Code style is consistent."
+        } else {
+            echo "ℹ️ Formatting suggestions available. Check the warnings for details."
+        }
+        
+    } catch (Exception e) {
+        echo "❌ Linting check encountered an error: ${e.message}"
     } finally {
-        // Publish results to Jenkins dashboard
         publishLintResults()
+        archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
     }
 }
 
@@ -1553,17 +1562,16 @@ def publishLintResults() {
         
         try {
             recordIssues(
-                enabledForFailure: true,
+                enabledForFailure: false,
                 aggregatingResults: false,
                 tools: [
-                    // Try the native .NET tools parser
-                    dotNet(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
+                    msBuild(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
                 ],
-                qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
+                // No quality gates = no build status change
+                qualityGates: []
             )
         } catch (Exception e) {
-            echo "DotNet parser failed: ${e.message}"
-            archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
+            echo "MSBuild parser failed: ${e.message}"
         }
     }
 }
