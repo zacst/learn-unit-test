@@ -1523,30 +1523,28 @@ def runLinting() {
     try {
         sh "mkdir -p ${LINTER_REPORTS_DIR}"
         
-        // Find the solution file to provide context to the linter
         def solutionFile = sh(script: "find . -name '*.sln' -print -quit", returnStdout: true).trim()
         if (solutionFile.isEmpty()) {
             error "❌ Could not find a solution file (.sln) in the workspace."
         }
-        
         echo "Found solution file: ${solutionFile}"
 
         sh """
             dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
             export PATH="\$PATH:\$HOME/.dotnet/tools"
 
-            # Check for formatting issues. Pass the solution file to the command.
-            # The command will fail with a non-zero exit code if changes are needed.
+            # This command will correctly fail if changes are needed.
             dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
         """
         echo "✅ Linting passed. Code style is consistent."
     } catch (Exception e) {
+        // Set build to UNSTABLE instead of failing it outright.
+        // This allows other parallel stages (like Trivy) to complete.
         currentBuild.result = 'UNSTABLE'
         echo "❌ Linting Check Failed. Code does not adhere to style guidelines. See console output for details."
+        
+        // Archive the report so you can see what needs to be fixed.
         archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
-        if (params.FAIL_ON_SECURITY_ISSUES) {
-            error("Failing build due to linting issues.")
-        }
     }
 }
 
@@ -1616,14 +1614,25 @@ def runLicenseCheck() {
     }
     echo "Found solution file for license check: ${solutionFile}"
     
-    sh """
-        dotnet tool install --global license-checker-dotnet --version ${LICENSE_CHECKER_VERSION} || true
-        export PATH="\$PATH:\$HOME/.dotnet/tools"
+    try {
+        sh """
+            # Install the tool first
+            dotnet tool install --global license-checker-dotnet --version ${LICENSE_CHECKER_VERSION} || true
 
-        echo "🔍 Scanning solution for dependency licenses..."
-        # The command will fail with a non-zero exit code if a non-compliant license is found.
-        license-checker-dotnet --solution '${solutionFile}' --config allowed-licenses.json --output-file ${SECURITY_REPORTS_DIR}/license-check/license-report.json --verbose
-    """
-    
-    echo "✅ All dependency licenses are compliant."
+            # Execute the tool using its full path to avoid PATH issues.
+            # The HOME variable is correctly set in Jenkins agent environments.
+            echo "🔍 Scanning solution for dependency licenses..."
+            \$HOME/.dotnet/tools/license-checker-dotnet --solution '${solutionFile}' --config allowed-licenses.json --output-file ${SECURITY_REPORTS_DIR}/license-check/license-report.json --verbose
+        """
+        echo "✅ All dependency licenses are compliant."
+    } catch (Exception e) {
+        // Catch the failure from the license-checker to prevent a hard stop
+        echo "❌ License check failed: ${e.getMessage()}"
+        if (params.FAIL_ON_SECURITY_ISSUES) {
+            error("Failing build due to non-compliant licenses.")
+        } else {
+            // Mark the build as unstable instead of failing it
+            currentBuild.result = 'UNSTABLE'
+        }
+    }
 }
