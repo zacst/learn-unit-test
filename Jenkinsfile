@@ -35,6 +35,13 @@ pipeline {
         DEPENDENCY_CHECK_VERSION = '9.2.0'
         SEMGREP_TIMEOUT = '300'
 
+        // Linter, Secrets, and License Tool Configuration
+        LINTER_REPORTS_DIR = 'linter-reports'
+        DOTNET_FORMAT_VERSION = '7.0.400' // Use a version compatible with your SDK
+        SECRETS_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/secrets"
+        GITLEAKS_VERSION = '8.18.2'
+        LICENSE_CHECKER_VERSION = '3.0.0'
+
         // DAST Configuration
         DAST_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/dast"
     }
@@ -77,6 +84,24 @@ pipeline {
             name: 'SECURITY_SCAN_LEVEL',
             choices: ['BASIC', 'COMPREHENSIVE', 'FULL'],
             description: 'Security scanning depth level'
+        )
+
+        booleanParam(
+            name: 'ENABLE_LINTING',
+            defaultValue: true,
+            description: 'Enable .NET code style linting with dotnet-format'
+        )
+
+        booleanParam(
+            name: 'ENABLE_SECRETS_SCAN',
+            defaultValue: true,
+            description: 'Enable secrets detection scan with Gitleaks'
+        )
+
+        booleanParam(
+            name: 'ENABLE_LICENSE_CHECK',
+            defaultValue: true,
+            description: 'Enable dependency license compliance check'
         )
 
         // DAST Parameters
@@ -637,6 +662,24 @@ pipeline {
                         }
                     }
                 }
+
+                stage('Linting & Code Style') {
+                    when { expression { params.ENABLE_LINTING } }
+                    steps {
+                        script {
+                            runLinting()
+                        }
+                    }
+                }
+
+                stage('Secrets Detection') {
+                    when { expression { params.ENABLE_SECRETS_SCAN } }
+                    steps {
+                        script {
+                            runSecretsScan()
+                        }
+                    }
+                }
                 
                 stage('Container Security Scan') {
                     when {
@@ -664,18 +707,20 @@ pipeline {
                 
                 stage('License Compliance Check') {
                     when {
-                        expression { params.SECURITY_SCAN_LEVEL == 'FULL' }
+                        expression { params.ENABLE_LICENSE_CHECK && (params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || params.SECURITY_SCAN_LEVEL == 'FULL') }
                     }
                     steps {
                         script {
-                            echo "🔒 Running license compliance check..."
-                            
                             try {
                                 sh "mkdir -p ${SECURITY_REPORTS_DIR}/license-check"
-                                runLicenseCheck()
-                                
+                                runLicenseCheck() // This will call the new, improved helper function
                             } catch (Exception e) {
                                 echo "❌ License check failed: ${e.getMessage()}"
+                                if (params.FAIL_ON_SECURITY_ISSUES) {
+                                    error("Failing build due to non-compliant licenses.")
+                                } else {
+                                    currentBuild.result = 'UNSTABLE'
+                                }
                             }
                         }
                     }
@@ -1309,29 +1354,6 @@ def runTrivyScan() {
     echo "✅ Trivy scan completed"
 }
 
-def runLicenseCheck() {
-    sh """
-        echo "📋 Checking NuGet package licenses..."
-        
-        find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*" | while read project; do
-            echo "Checking project: \$project"
-            
-            dotnet list "\$project" package --vulnerable --include-transitive > \\
-                ${SECURITY_REPORTS_DIR}/license-check/vulnerable-packages.txt 2>&1 || true
-            
-            dotnet list "\$project" package --include-transitive > \\
-                ${SECURITY_REPORTS_DIR}/license-check/all-packages.txt 2>&1 || true
-        done
-        
-        echo "📊 License compliance summary:" > ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
-        echo "Generated on: \$(date)" >> ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
-        echo "Project: \${JOB_NAME}" >> ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
-        echo "Build: \${BUILD_NUMBER}" >> ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
-    """
-    
-    echo "✅ License compliance check completed"
-}
-
 def archiveSecurityReports() {
     echo "📊 Archiving security reports..."
     
@@ -1396,35 +1418,6 @@ def publishSecurityResults() {
                           name: 'Trivy Results',
                        qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
         }
-
-        // // Publish HTML report for Trivy
-        // publishHTML([
-        //     reportDir: "${SECURITY_REPORTS_DIR}/trivy",
-        //     reportFiles: "index.html",
-        //     reportName: "🛡️ Trivy HTML Report",
-        //     keepAll: true,
-        //     alwaysLinkToLastBuild: true,
-        //     allowMissing: false
-        // ])
-        
-        // // Publish standalone HTML report with enhanced configuration
-        // if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html")) {
-        //     publishHTML([
-        //         allowMissing: false,
-        //         alwaysLinkToLastBuild: true,
-        //         keepAll: true,
-        //         reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
-        //         reportFiles: 'dependency-check-report.html',
-        //         reportName: 'OWASP Dependency Check Report',
-        //         reportTitles: '',
-        //         includes: '**/*',
-        //         allowUnpublishedJobExecutions: false,
-        //         ignoreResourceNotFound: false,
-        //         reportBuildPolicy: 'ALWAYS',
-        //         escapeUnderscores: false
-        //     ])
-        //     echo "✅ HTML report published successfully"
-        // }
         
         echo "✅ Security results published to Jenkins UI"
         
@@ -1520,4 +1513,100 @@ def evaluateSecurityGates() {
     }
     
     echo "✅ Security gate evaluation completed"
+}
+
+/**
+ * Runs dotnet-format to check for code style and formatting issues.
+ */
+def runLinting() {
+    echo "💅 Running .NET Linter (dotnet-format)..."
+    try {
+        sh "mkdir -p ${LINTER_REPORTS_DIR}"
+        sh """
+            dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
+            export PATH="\$PATH:\$HOME/.dotnet/tools"
+
+            # Check for formatting issues. The command will fail if changes are needed.
+            dotnet format --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
+        """
+        echo "✅ Linting passed. Code style is consistent."
+    } catch (Exception e) {
+        currentBuild.result = 'UNSTABLE'
+        echo "❌ Linting Check Failed. Code does not adhere to style guidelines. See console output for details."
+        archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
+        if (params.FAIL_ON_SECURITY_ISSUES) {
+            error("Failing build due to linting issues.")
+        }
+    }
+}
+
+/**
+ * Runs Gitleaks to detect hardcoded secrets in the repository.
+ */
+def runSecretsScan() {
+    echo "🤫 Running Secrets Detection (Gitleaks)..."
+    try {
+        sh "mkdir -p ${SECRETS_REPORTS_DIR}"
+        sh """
+            wget -q https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+            tar -xzf gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+            chmod +x gitleaks
+
+            # Run gitleaks and output to SARIF. --exit-code 0 prevents the shell step from failing the build immediately.
+            ./gitleaks detect --source="." --report-path="${SECRETS_REPORTS_DIR}/gitleaks-report.sarif" --report-format="sarif" --exit-code 0
+        """
+
+        // Check if the report was actually created and is not empty
+        def reportFile = "${SECRETS_REPORTS_DIR}/gitleaks-report.sarif"
+        if (fileExists(reportFile)) {
+            recordIssues(
+                tool: sarif(pattern: reportFile, id: 'gitleaks', name: 'Gitleaks Secrets'),
+                enabledForFailure: true,
+                qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
+            )
+            
+            def gitleaksReport = readJSON(file: reportFile)
+            def resultsCount = gitleaksReport.runs[0].results.size()
+
+            echo "📊 Gitleaks found ${resultsCount} potential secret(s)."
+            if (resultsCount > 0) {
+                if (params.FAIL_ON_SECURITY_ISSUES) {
+                    error("❌ Build failed: Secrets detected in the codebase by Gitleaks.")
+                } else {
+                    currentBuild.result = 'UNSTABLE'
+                }
+            } else {
+                echo "✅ No secrets found."
+            }
+        } else {
+            echo "⚠️ Gitleaks report was not generated."
+        }
+    } catch (Exception e) {
+        currentBuild.result = 'UNSTABLE'
+        echo "❌ Gitleaks scan failed to execute: ${e.getMessage()}"
+    }
+}
+
+def runLicenseCheck() {
+    echo "⚖️ Running .NET License Compliance Check..."
+
+    // This file defines your license policy. Ideally, this should be checked into your source control.
+    writeFile file: 'allowed-licenses.json', text: '''
+    {
+      "allowed": [
+        "MIT", "Apache-2.0", "BSD-3-Clause", "BSD-2-Clause", "ISC", "MS-PL"
+      ]
+    }
+    '''
+    
+    sh """
+        dotnet tool install --global license-checker-dotnet --version ${LICENSE_CHECKER_VERSION} || true
+        export PATH="\$PATH:\$HOME/.dotnet/tools"
+
+        echo "🔍 Scanning solution for dependency licenses..."
+        # The command will fail with a non-zero exit code if a non-compliant license is found.
+        license-checker-dotnet --solution . --config allowed-licenses.json --output-file ${SECURITY_REPORTS_DIR}/license-check/license-report.json --verbose
+    """
+    
+    echo "✅ All dependency licenses are compliant."
 }
