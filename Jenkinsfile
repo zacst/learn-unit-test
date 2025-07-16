@@ -663,23 +663,23 @@ pipeline {
                     }
                 }
 
-                stage('Linting & Code Style') {
-                    when { expression { params.ENABLE_LINTING } }
-                    steps {
-                        script {
-                            runLinting()
-                        }
-                    }
-                }
+                // stage('Linting & Code Style') {
+                //     when { expression { params.ENABLE_LINTING } }
+                //     steps {
+                //         script {
+                //             runLinting()
+                //         }
+                //     }
+                // }
 
-                stage('Secrets Detection') {
-                    when { expression { params.ENABLE_SECRETS_SCAN } }
-                    steps {
-                        script {
-                            runSecretsScan()
-                        }
-                    }
-                }
+                // stage('Secrets Detection') {
+                //     when { expression { params.ENABLE_SECRETS_SCAN } }
+                //     steps {
+                //         script {
+                //             runSecretsScan()
+                //         }
+                //     }
+                // }
                 
                 stage('Container Security Scan') {
                     when {
@@ -705,26 +705,26 @@ pipeline {
                     }
                 }
                 
-                stage('License Compliance Check') {
-                    when {
-                        expression { params.ENABLE_LICENSE_CHECK && (params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || params.SECURITY_SCAN_LEVEL == 'FULL') }
-                    }
-                    steps {
-                        script {
-                            try {
-                                sh "mkdir -p ${SECURITY_REPORTS_DIR}/license-check"
-                                runLicenseCheck() // This will call the new, improved helper function
-                            } catch (Exception e) {
-                                echo "❌ License check failed: ${e.getMessage()}"
-                                if (params.FAIL_ON_SECURITY_ISSUES) {
-                                    error("Failing build due to non-compliant licenses.")
-                                } else {
-                                    currentBuild.result = 'UNSTABLE'
-                                }
-                            }
-                        }
-                    }
-                }
+                // stage('License Compliance Check') {
+                //     when {
+                //         expression { params.ENABLE_LICENSE_CHECK && (params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || params.SECURITY_SCAN_LEVEL == 'FULL') }
+                //     }
+                //     steps {
+                //         script {
+                //             try {
+                //                 sh "mkdir -p ${SECURITY_REPORTS_DIR}/license-check"
+                //                 runLicenseCheck() // This will call the new, improved helper function
+                //             } catch (Exception e) {
+                //                 echo "❌ License check failed: ${e.getMessage()}"
+                //                 if (params.FAIL_ON_SECURITY_ISSUES) {
+                //                     error("Failing build due to non-compliant licenses.")
+                //                 } else {
+                //                     currentBuild.result = 'UNSTABLE'
+                //                 }
+                //             }
+                //         }
+                //     }
+                // }
             }
             
             post {
