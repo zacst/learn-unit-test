@@ -1301,24 +1301,24 @@ def publishSecurityResults() {
                        qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
         }
         
-        // Publish standalone HTML report with enhanced configuration
-        if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html")) {
-            publishHTML([
-                allowMissing: false,
-                alwaysLinkToLastBuild: true,
-                keepAll: true,
-                reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
-                reportFiles: 'dependency-check-report.html',
-                reportName: 'OWASP Dependency Check Report',
-                reportTitles: '',
-                includes: '**/*',
-                allowUnpublishedJobExecutions: false,
-                ignoreResourceNotFound: false,
-                reportBuildPolicy: 'ALWAYS',
-                escapeUnderscores: false
-            ])
-            echo "✅ HTML report published successfully"
-        }
+        // // Publish standalone HTML report with enhanced configuration
+        // if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html")) {
+        //     publishHTML([
+        //         allowMissing: false,
+        //         alwaysLinkToLastBuild: true,
+        //         keepAll: true,
+        //         reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
+        //         reportFiles: 'dependency-check-report.html',
+        //         reportName: 'OWASP Dependency Check Report',
+        //         reportTitles: '',
+        //         includes: '**/*',
+        //         allowUnpublishedJobExecutions: false,
+        //         ignoreResourceNotFound: false,
+        //         reportBuildPolicy: 'ALWAYS',
+        //         escapeUnderscores: false
+        //     ])
+        //     echo "✅ HTML report published successfully"
+        // }
         
         echo "✅ Security results published to Jenkins UI"
         
