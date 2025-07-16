@@ -1556,17 +1556,15 @@ def publishLintResults() {
                 enabledForFailure: true,
                 aggregatingResults: false,
                 tools: [
-                    // MSBuild parser - specifically designed for .NET tools
-                    msBuild(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
+                    // Try the native .NET tools parser
+                    dotNet(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
                 ],
                 qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
             )
         } catch (Exception e) {
-            echo "MSBuild parser failed: ${e.message}"
+            echo "DotNet parser failed: ${e.message}"
             archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
         }
-    } else {
-        echo "⚠️ No linting report found at ${LINTER_REPORTS_DIR}/dotnet-format-report.json"
     }
 }
 
