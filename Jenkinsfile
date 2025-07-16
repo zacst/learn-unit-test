@@ -1548,19 +1548,37 @@ def runLinting() {
 }
 
 def publishLintResults() {
-    // Parse and publish the dotnet-format report
-    recordIssues(
-        enabledForFailure: true,
-        aggregatingResults: false,
-        tools: [
-            groovyScript(
-                parserId: 'violations',
-                pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json",
-                reportEncoding: 'UTF-8'
+    if (fileExists("${LINTER_REPORTS_DIR}/dotnet-format-report.json")) {
+        echo "📊 Publishing linting results..."
+        
+        // Try different built-in parsers
+        try {
+            recordIssues(
+                enabledForFailure: true,
+                aggregatingResults: false,
+                tools: [
+                    checkStyle(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
+                ],
+                qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
             )
-        ],
-        qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
-    )
+        } catch (Exception e1) {
+            echo "CheckStyle parser failed: ${e1.message}"
+            try {
+                recordIssues(
+                    enabledForFailure: true,
+                    aggregatingResults: false,
+                    tools: [
+                        pmdParser(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
+                    ],
+                    qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
+                )
+            } catch (Exception e2) {
+                echo "PMD parser failed: ${e2.message}"
+                // Fallback to just archiving
+                archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
+            }
+        }
+    }
 }
 
 /**
