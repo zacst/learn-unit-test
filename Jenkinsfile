@@ -1301,6 +1301,7 @@ def publishSecurityResults() {
         if (fileExists("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")) {
             recordIssues enabledForFailure: true,
                        tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif", id: 'semgrep')],
+                       name: 'Semgrep Results',
                        qualityGates: [[threshold: 1, type: 'TOTAL_ERROR', unstable: true]]
         }
         
@@ -1308,6 +1309,7 @@ def publishSecurityResults() {
         if (fileExists("${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")) {
             recordIssues enabledForFailure: true,
                        tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif", id: 'trivy')],
+                          name: 'Trivy Results',
                        qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
         }
         
