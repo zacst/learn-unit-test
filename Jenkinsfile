@@ -34,6 +34,9 @@ pipeline {
         SECURITY_REPORTS_DIR = 'security-reports'
         DEPENDENCY_CHECK_VERSION = '9.2.0'
         SEMGREP_TIMEOUT = '300'
+
+        // DAST Configuration
+        DAST_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/dast"
     }
 
     options {
@@ -75,6 +78,14 @@ pipeline {
             choices: ['BASIC', 'COMPREHENSIVE', 'FULL'],
             description: 'Security scanning depth level'
         )
+
+        // DAST Parameters
+        booleanParam(name: 'ENABLE_DAST_SCAN', defaultValue: true, description: 'Enable Dynamic Application Security Testing (DAST) with OWASP ZAP')
+        string(name: 'STAGING_URL', defaultValue: 'http://your-staging-app.example.com', description: 'URL of the deployed staging application for DAST scan')
+
+        // // Notification Parameters
+        // string(name: 'SLACK_CHANNEL', defaultValue: '#ci-alerts', description: 'Slack channel to send notifications to')
+        // credentials(name: 'SLACK_CREDENTIAL_ID', description: 'Jenkins credential ID for the Slack Bot Token', required: false)
     }
 
     stages {
@@ -944,6 +955,68 @@ pipeline {
                 }
             }
         }
+
+        //  // Dynamic Application Security Testing (DAST)
+        // stage('DAST Scan (OWASP ZAP)') {
+        //     when { expression { params.ENABLE_DAST_SCAN } }
+        //     steps {
+        //         script {
+        //             catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+        //                 echo "🔒 Running DAST Scan on ${params.STAGING_URL}"
+        //                 sh "mkdir -p ${DAST_REPORTS_DIR}"
+
+        //                 // Use the official OWASP ZAP Docker image to run a baseline scan
+        //                 // This scan is non-intrusive and ideal for CI/CD pipelines
+        //                 try {
+        //                     sh """
+        //                         docker pull owasp/zap2docker-stable
+        //                         docker run --rm -v \$(pwd):/zap/wrk/:rw --network=host owasp/zap2docker-stable zap-baseline.py \\
+        //                             -t ${params.STAGING_URL} \\
+        //                             -g gen.conf \\
+        //                             -r ${DAST_REPORTS_DIR}/dast-report.html \\
+        //                             -w ${DAST_REPORTS_DIR}/dast-report.md \\
+        //                             -x ${DAST_REPORTS_DIR}/dast-report.xml \\
+        //                             -J ${DAST_REPORTS_DIR}/dast-report.json || true 
+        //                     """
+        //                     // The '|| true' prevents the build from failing if ZAP finds issues.
+        //                     // We will check the results and decide the build status below.
+
+        //                 } catch (Exception e) {
+        //                     echo "❌ DAST scan execution failed: ${e.message}"
+        //                     currentBuild.result = 'UNSTABLE'
+        //                 }
+
+        //                 // Publish the HTML report to Jenkins UI for easy viewing
+        //                 publishHTML(target: [
+        //                     allowMissing: true,
+        //                     alwaysLinkToLastBuild: true,
+        //                     keepAll: true,
+        //                     reportDir: DAST_REPORTS_DIR,
+        //                     reportFiles: 'dast-report.html',
+        //                     reportName: '🛡️ DAST Report (OWASP ZAP)'
+        //                 ])
+
+        //                 // Check the JSON report for findings and mark build as unstable if any are found
+        //                 def jsonReport = readFile("${DAST_REPORTS_DIR}/dast-report.json")
+        //                 def zapResults = new groovy.json.JsonSlurper().parseText(jsonReport)
+        //                 def highAlerts = zapResults.site.alerts.findAll { it.risk == 'High' }.size()
+        //                 def mediumAlerts = zapResults.site.alerts.findAll { it.risk == 'Medium' }.size()
+        //                 def lowAlerts = zapResults.site.alerts.findAll { it.risk == 'Low' }.size()
+                        
+        //                 env.DAST_HIGH_ALERTS = highAlerts.toString()
+        //                 env.DAST_MEDIUM_ALERTS = mediumAlerts.toString()
+        //                 env.DAST_LOW_ALERTS = lowAlerts.toString()
+
+        //                 if (highAlerts > 0 || mediumAlerts > 0) {
+        //                     echo "⚠️ DAST scan found ${highAlerts} High and ${mediumAlerts} Medium risk alerts. Marking build as UNSTABLE."
+        //                     currentBuild.result = 'UNSTABLE'
+        //                 } else {
+        //                     echo "✅ DAST scan completed with no High or Medium risk alerts."
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
     }
 
     post {
