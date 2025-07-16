@@ -1324,16 +1324,15 @@ def publishSecurityResults() {
                        qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
         }
 
-        // Publish HTML report for Trivy
-        publishHTML([
-            reportDir: "${SECURITY_REPORTS_DIR}/trivy",
-            reportFiles: "index.html",
-            reportName: "🛡️ Trivy HTML Report",
-            keepAll: true,
-            alwaysLinkToLastBuild: true,
-            allowMissing: false
-        ])
-
+        // // Publish HTML report for Trivy
+        // publishHTML([
+        //     reportDir: "${SECURITY_REPORTS_DIR}/trivy",
+        //     reportFiles: "index.html",
+        //     reportName: "🛡️ Trivy HTML Report",
+        //     keepAll: true,
+        //     alwaysLinkToLastBuild: true,
+        //     allowMissing: false
+        // ])
         
         // // Publish standalone HTML report with enhanced configuration
         // if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html")) {
