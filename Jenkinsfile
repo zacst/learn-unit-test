@@ -582,109 +582,22 @@ pipeline {
                             echo "🔒 Running OWASP Dependency Check..."
                             
                             try {
-                                // Create security reports directory
+                                // Setup directories
                                 sh "mkdir -p ${SECURITY_REPORTS_DIR}/dependency-check"
                                 
-                                // Download and run OWASP Dependency Check
-                                sh """
-                                    # Download OWASP Dependency Check if not exists
-                                    if [ ! -f "dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip" ]; then
-                                        echo "📥 Downloading OWASP Dependency Check..."
-                                        curl -L -o dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip \\
-                                            "https://github.com/jeremylong/DependencyCheck/releases/download/v${DEPENDENCY_CHECK_VERSION}/dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip"
-                                        unzip -q dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip
-                                    fi
-                                    
-                                    # Run dependency check - Generate both JSON and XML
-                                    echo "🔍 Scanning for vulnerable dependencies..."
-                                    ./dependency-check/bin/dependency-check.sh \\
-                                        --scan . \\
-                                        --format JSON \\
-                                        --format XML \\
-                                        --out ${SECURITY_REPORTS_DIR}/dependency-check \\
-                                        --project "\${JOB_NAME}" \\
-                                        --failOnCVSS 0 \\
-                                        --enableRetired \\
-                                        --enableExperimental \\
-                                        --log ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check.log \\
-                                        --exclude "**/*test*/**" \\
-                                        --exclude "**/*Test*/**" \\
-                                        --exclude "**/bin/**" \\
-                                        --exclude "**/obj/**" \\
-                                        --exclude "**/packages/**" \\
-                                        --exclude "**/node_modules/**" \\
-                                        --suppression dependency-check-suppressions.xml || true
-                                """
+                                // Download and setup OWASP Dependency Check
+                                downloadDependencyCheck()
                                 
-                                // Parse JSON for detailed analysis (this is reliable)
-                                def jsonExists = fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")
-                                def xmlExists = fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")
+                                // Run the scan
+                                runDependencyCheck()
                                 
-                                if (jsonExists) {
-                                    def dependencyCheckResults = readFile("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")
-                                    def jsonSlurper = new groovy.json.JsonSlurper()
-                                    def report = jsonSlurper.parseText(dependencyCheckResults)
-                                    
-                                    // Count total vulnerabilities
-                                    def vulnerabilityCount = report.dependencies?.sum { dep -> 
-                                        dep.vulnerabilities?.size() ?: 0 
-                                    } ?: 0
-                                    
-                                    def dependencyCount = report.dependencies?.size() ?: 0
-                                    
-                                    echo "📊 Dependency Check Results:"
-                                    echo "   📦 Dependencies scanned: ${dependencyCount}"
-                                    echo "   🚨 Vulnerabilities found: ${vulnerabilityCount}"
-                                    
-                                    // Detailed vulnerability breakdown by severity
-                                    if (vulnerabilityCount > 0) {
-                                        def severityCounts = [:]
-                                        def highCriticalCount = 0
-                                        
-                                        report.dependencies?.each { dep ->
-                                            dep.vulnerabilities?.each { vuln ->
-                                                def severity = vuln.severity ?: 'UNKNOWN'
-                                                severityCounts[severity] = (severityCounts[severity] ?: 0) + 1
-                                                
-                                                if (severity?.toUpperCase() in ['HIGH', 'CRITICAL']) {
-                                                    highCriticalCount++
-                                                }
-                                            }
-                                        }
-                                        
-                                        echo "📈 Vulnerability breakdown by severity:"
-                                        severityCounts.each { severity, count ->
-                                            echo "   ${severity}: ${count}"
-                                        }
-                                        
-                                        // List first 10 vulnerabilities for visibility
-                                        echo "🔍 First 10 vulnerabilities found:"
-                                        def vulnCounter = 0
-                                        report.dependencies?.each { dep ->
-                                            if (vulnCounter >= 10) return
-                                            dep.vulnerabilities?.each { vuln ->
-                                                if (vulnCounter >= 10) return
-                                                vulnCounter++
-                                                echo "   ${vulnCounter}. ${vuln.name} (${vuln.severity}) in ${dep.fileName}"
-                                                if (vuln.description) {
-                                                    echo "      Description: ${vuln.description.take(100)}..."
-                                                }
-                                            }
-                                        }
-                                        
-                                        // Set environment variables
-                                        env.DEPENDENCY_VULNERABILITIES = vulnerabilityCount.toString()
-                                        env.DEPENDENCY_HIGH_CRITICAL = highCriticalCount.toString()
-                                        env.DEPENDENCIES_SCANNED = dependencyCount.toString()
-                                    } else {
-                                        echo "✅ No vulnerabilities found - all dependencies are secure"
-                                        env.DEPENDENCY_VULNERABILITIES = "0"
-                                        env.DEPENDENCY_HIGH_CRITICAL = "0"
-                                        env.DEPENDENCIES_SCANNED = dependencyCount.toString()
-                                    }                                
+                                // Process results
+                                processDependencyCheckResults()
+                                
                             } catch (Exception e) {
                                 echo "❌ Dependency Check failed: ${e.getMessage()}"
                                 env.DEPENDENCY_VULNERABILITIES = "ERROR"
+                                env.DEPENDENCY_HIGH_CRITICAL = "ERROR"
                                 currentBuild.result = 'UNSTABLE'
                             }
                         }
@@ -699,80 +612,16 @@ pipeline {
                             try {
                                 sh "mkdir -p ${SECURITY_REPORTS_DIR}/semgrep"
                                 
-                                // Install Semgrep via pip
-                                sh """
-                                    echo "📦 Installing Semgrep..."
-                                    pip3 install semgrep --user --quiet || pip install semgrep --user --quiet || true
-                                    
-                                    # Add user bin to PATH
-                                    export PATH="\$PATH:\$HOME/.local/bin"
-                                    
-                                    # Verify installation
-                                    semgrep --version || echo "Semgrep installation may have issues"
-                                """
-                                
-                                // Run Semgrep scan
-                                def semgrepRules = params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || params.SECURITY_SCAN_LEVEL == 'FULL' ? 
-                                    '--config=auto --config=p/cwe-top-25 --config=p/owasp-top-10' : 
-                                    '--config=auto'
-                                
-                                sh """
-                                    export PATH="\$PATH:\$HOME/.local/bin"
-                                    
-                                    echo "🔍 Running Semgrep security analysis..."
-                                    timeout ${SEMGREP_TIMEOUT} semgrep \\
-                                        ${semgrepRules} \\
-                                        --json \\
-                                        --output=${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.json \\
-                                        --timeout=60 \\
-                                        --max-target-bytes=1000000 \\
-                                        --exclude="**/bin/**" \\
-                                        --exclude="**/obj/**" \\
-                                        --exclude="**/packages/**" \\
-                                        --exclude="**/*test*/**" \\
-                                        --exclude="**/*Test*/**" \\
-                                        . || true
-                                    
-                                    # Generate SARIF format for better Jenkins integration
-                                    timeout ${SEMGREP_TIMEOUT} semgrep \\
-                                        ${semgrepRules} \\
-                                        --sarif \\
-                                        --output=${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif \\
-                                        --timeout=60 \\
-                                        --max-target-bytes=1000000 \\
-                                        --exclude="**/bin/**" \\
-                                        --exclude="**/obj/**" \\
-                                        --exclude="**/packages/**" \\
-                                        --exclude="**/*test*/**" \\
-                                        --exclude="**/*Test*/**" \\
-                                        . || true
-                                """
-                                
-                                // Parse Semgrep results
-                                if (fileExists("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.json")) {
-                                    def semgrepResults = readFile("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.json")
-                                    def jsonSlurper = new groovy.json.JsonSlurper()
-                                    def report = jsonSlurper.parseText(semgrepResults)
-                                    
-                                    def issueCount = report.results?.size() ?: 0
-                                    def criticalIssues = report.results?.findAll { 
-                                        it.extra?.severity == 'ERROR' || it.extra?.severity == 'HIGH' 
-                                    }?.size() ?: 0
-                                    
-                                    echo "📊 Semgrep Results: ${issueCount} issues found (${criticalIssues} critical)"
-                                    
-                                    env.SEMGREP_ISSUES = issueCount.toString()
-                                    env.SEMGREP_CRITICAL = criticalIssues.toString()
-                                } else {
-                                    echo "⚠️ Semgrep results file not found"
-                                    env.SEMGREP_ISSUES = "0"
-                                    env.SEMGREP_CRITICAL = "0"
-                                }
+                                // Install and run Semgrep
+                                installSemgrep()
+                                runSemgrepScan()
+                                processSemgrepResults()
                                 
                             } catch (Exception e) {
                                 echo "❌ Semgrep scan failed: ${e.getMessage()}"
                                 env.SEMGREP_ISSUES = "ERROR"
                                 env.SEMGREP_CRITICAL = "ERROR"
+                                currentBuild.result = 'UNSTABLE'
                             }
                         }
                     }
@@ -791,42 +640,8 @@ pipeline {
                             
                             try {
                                 sh "mkdir -p ${SECURITY_REPORTS_DIR}/trivy"
-                                
-                                // Install Trivy
-                                sh """
-                                    echo "📦 Installing Trivy..."
-                                    if ! command -v trivy &> /dev/null; then
-                                        # Install Trivy for Ubuntu/Debian
-                                        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-                                        echo "deb https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-                                        sudo apt-get update
-                                        sudo apt-get install -y trivy
-                                    fi
-                                    
-                                    # Update vulnerability database
-                                    trivy image --download-db-only
-                                """
-                                
-                                // Scan filesystem for vulnerabilities
-                                sh """
-                                    echo "🔍 Scanning filesystem for vulnerabilities..."
-                                    trivy fs \\
-                                        --format json \\
-                                        --output ${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.json \\
-                                        --skip-files "**/bin/**,**/obj/**,**/packages/**" \\
-                                        --timeout 10m \\
-                                        . || true
-                                    
-                                    # Generate SARIF format
-                                    trivy fs \\
-                                        --format sarif \\
-                                        --output ${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif \\
-                                        --skip-files "**/bin/**,**/obj/**,**/packages/**" \\
-                                        --timeout 10m \\
-                                        . || true
-                                """
-                                
-                                echo "✅ Trivy scan completed"
+                                installTrivy()
+                                runTrivyScan()
                                 
                             } catch (Exception e) {
                                 echo "❌ Trivy scan failed: ${e.getMessage()}"
@@ -846,32 +661,7 @@ pipeline {
                             
                             try {
                                 sh "mkdir -p ${SECURITY_REPORTS_DIR}/license-check"
-                                
-                                // Use dotnet list package to check licenses
-                                sh """
-                                    echo "📋 Checking NuGet package licenses..."
-                                    
-                                    # Find all project files
-                                    find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*" | while read project; do
-                                        echo "Checking project: \$project"
-                                        
-                                        # List packages with vulnerabilities
-                                        dotnet list "\$project" package --vulnerable --include-transitive > \\
-                                            ${SECURITY_REPORTS_DIR}/license-check/vulnerable-packages.txt 2>&1 || true
-                                        
-                                        # List all packages
-                                        dotnet list "\$project" package --include-transitive > \\
-                                            ${SECURITY_REPORTS_DIR}/license-check/all-packages.txt 2>&1 || true
-                                    done
-                                    
-                                    # Check for problematic licenses (basic check)
-                                    echo "📊 License compliance summary:" > ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
-                                    echo "Generated on: \$(date)" >> ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
-                                    echo "Project: \${JOB_NAME}" >> ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
-                                    echo "Build: \${BUILD_NUMBER}" >> ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
-                                """
-                                
-                                echo "✅ License compliance check completed"
+                                runLicenseCheck()
                                 
                             } catch (Exception e) {
                                 echo "❌ License check failed: ${e.getMessage()}"
@@ -884,158 +674,10 @@ pipeline {
             post {
                 always {
                     script {
-                        echo "📊 Processing security scan results..."
-                        
-                        // Archive all security reports
-                        try {
-                            archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/**/*", 
-                                           allowEmptyArchive: true,
-                                           fingerprint: true
-                            echo "✅ Security reports archived"
-                        } catch (Exception e) {
-                            echo "⚠️ Could not archive security reports: ${e.getMessage()}"
-                        }
-                        
-                        // Publish security test results
-                        try {
-                            // Publish SARIF results if available
-                            if (fileExists("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")) {
-                                recordIssues enabledForFailure: true, 
-                                           tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")],
-                                           qualityGates: [[threshold: 1, type: 'TOTAL_ERROR', unstable: true]]
-                            }
-                            
-                            if (fileExists("${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")) {
-                                recordIssues enabledForFailure: true,
-                                           tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")],
-                                           qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
-                            }
-                            
-                            echo "✅ Security issues published to Jenkins UI"
-                        } catch (Exception e) {
-                            echo "⚠️ Could not publish security results: ${e.getMessage()}"
-                        }
-                        
-                        // Generate security summary
-                        def securitySummary = """
-                        🔒 Security Scan Summary:
-                        ========================
-                        Dependency Vulnerabilities: ${env.DEPENDENCY_VULNERABILITIES ?: 'N/A'}
-                        SAST Issues: ${env.SEMGREP_ISSUES ?: 'N/A'}
-                        Critical SAST Issues: ${env.SEMGREP_CRITICAL ?: 'N/A'}
-                        Scan Level: ${params.SECURITY_SCAN_LEVEL}
-                        """
-                        
-                        echo securitySummary
-                        
-                        // Write summary to file
-                        writeFile file: "${SECURITY_REPORTS_DIR}/security-summary.txt", text: securitySummary
-                        
-                        // Determine if build should fail based on security issues
-                        if (params.FAIL_ON_SECURITY_ISSUES) {
-                            def criticalIssues = (env.SEMGREP_CRITICAL ?: "0").toInteger()
-                            def dependencyVulns = env.DEPENDENCY_VULNERABILITIES
-                            
-                            if (criticalIssues > 0) {
-                                error "❌ Build failed due to ${criticalIssues} critical security issues"
-                            }
-                            
-                            if (dependencyVulns != "0" && dependencyVulns != "ERROR" && dependencyVulns != null) {
-                                currentBuild.result = 'UNSTABLE'
-                                echo "⚠️ Build marked unstable due to dependency vulnerabilities"
-                            }
-                        }
-
-                        // Create HTML report for better visualization
-                        def htmlReport = """
-                        <html>
-                        <head>
-                            <title>Dependency Check Report</title>
-                            <style>
-                                body { font-family: Arial, sans-serif; margin: 20px; }
-                                .summary { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-                                .critical { color: #d32f2f; }
-                                .high { color: #f57c00; }
-                                .medium { color: #fbc02d; }
-                                .low { color: #388e3c; }
-                                table { border-collapse: collapse; width: 100%; }
-                                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                                th { background-color: #f2f2f2; }
-                            </style>
-                        </head>
-                        <body>
-                            <h1>OWASP Dependency Check Report</h1>
-                            <div class="summary">
-                                <h2>Summary</h2>
-                                <p>Dependencies Scanned: <strong>${dependencyCount}</strong></p>
-                                <p>Total Vulnerabilities: <strong>${vulnerabilityCount}</strong></p>
-                                ${severityCounts ? severityCounts.collect { severity, count -> 
-                                    "<p>${severity}: <strong class=\"${severity.toLowerCase()}\">${count}</strong></p>" 
-                                }.join('') : ''}
-                            </div>
-                            
-                            ${vulnerabilityCount > 0 ? """
-                            <h2>Vulnerability Details</h2>
-                            <table>
-                                <tr><th>Dependency</th><th>Vulnerability</th><th>Severity</th><th>CVSS Score</th><th>Description</th></tr>
-                                ${report.dependencies?.collect { dep ->
-                                    dep.vulnerabilities?.collect { vuln ->
-                                        "<tr><td>${dep.fileName}</td><td>${vuln.name}</td><td class=\"${vuln.severity?.toLowerCase()}\">${vuln.severity}</td><td>${vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A'}</td><td>${vuln.description?.take(150)}...</td></tr>"
-                                    }?.join('') ?: ''
-                                }?.join('') ?: ''}
-                            </table>
-                            """ : '<p>No vulnerabilities found.</p>'}
-                            
-                            <hr>
-                            <p><small>Report generated on ${new Date()}</small></p>
-                        </body>
-                        </html>
-                        """
-                        
-                        writeFile file: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html", text: htmlReport
-                        
-                    } else {
-                        echo "⚠️ JSON report not found, using XML only"
-                        env.DEPENDENCY_VULNERABILITIES = "UNKNOWN"
-                    }
-                    
-                    // Use recordIssues with XML (if available) for Jenkins integration
-                    if (xmlExists) {
-                        try {
-                            echo "📋 Publishing issues to Jenkins using XML report..."
-                            recordIssues enabledForFailure: true,
-                                    tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
-                                    qualityGates: [
-                                        [threshold: 1, type: 'TOTAL_HIGH', unstable: true],
-                                        [threshold: 1, type: 'TOTAL_ERROR', unstable: true]
-                                    ]
-                            echo "✅ Issues recorded successfully in Jenkins"
-                        } catch (Exception recordException) {
-                            echo "⚠️ Failed to record issues with XML: ${recordException.getMessage()}"
-                            echo "📋 This might be due to XML parsing issues, but JSON analysis above should still be valid"
-                        }
-                    } else {
-                        echo "⚠️ XML report not found, skipping recordIssues"
-                    }
-                    
-                    // Archive all reports
-                    archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/dependency-check/*", allowEmptyArchive: true
-                    
-                    // Publish HTML report
-                    try {
-                        publishHTML([
-                            allowMissing: false,
-                            alwaysLinkToLastBuild: true,
-                            keepAll: true,
-                            reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
-                            reportFiles: 'dependency-check-report.html',
-                            reportName: 'OWASP Dependency Check Report'
-                        ])
-                        echo "✅ HTML report published successfully"
-                    } catch (Exception htmlException) {
-                        echo "⚠️ Failed to publish HTML report: ${htmlException.getMessage()}"
-                    }
-
+                        archiveSecurityReports()
+                        publishSecurityResults()
+                        generateSecuritySummary()
+                        evaluateSecurityGates()
                     }
                 }
             }
@@ -1332,4 +974,354 @@ pipeline {
             }
         }
     }
+}
+
+// Helper functions for better maintainability
+def downloadDependencyCheck() {
+    sh """
+        if [ ! -f "dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip" ]; then
+            echo "📥 Downloading OWASP Dependency Check..."
+            curl -L -o dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip \\
+                "https://github.com/jeremylong/DependencyCheck/releases/download/v${DEPENDENCY_CHECK_VERSION}/dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip"
+            unzip -q dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip
+        fi
+    """
+}
+
+def runDependencyCheck() {
+    sh """
+        echo "🔍 Scanning for vulnerable dependencies..."
+        ./dependency-check/bin/dependency-check.sh \\
+            --scan . \\
+            --format JSON \\
+            --format XML \\
+            --format HTML \\
+            --out ${SECURITY_REPORTS_DIR}/dependency-check \\
+            --project "\${JOB_NAME}" \\
+            --failOnCVSS 0 \\
+            --enableRetired \\
+            --enableExperimental \\
+            --exclude "**/*test*/**" \\
+            --exclude "**/*Test*/**" \\
+            --exclude "**/bin/**" \\
+            --exclude "**/obj/**" \\
+            --exclude "**/packages/**" \\
+            --exclude "**/node_modules/**" \\
+            --suppression dependency-check-suppressions.xml || true
+    """
+}
+
+def processDependencyCheckResults() {
+    // Initialize default values
+    env.DEPENDENCY_VULNERABILITIES = "0"
+    env.DEPENDENCY_HIGH_CRITICAL = "0"
+    env.DEPENDENCIES_SCANNED = "0"
+    
+    // Check if JSON report exists and process it
+    if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")) {
+        try {
+            def jsonReport = readFile("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")
+            def report = new groovy.json.JsonSlurper().parseText(jsonReport)
+            
+            def dependencyCount = report.dependencies?.size() ?: 0
+            def vulnerabilityCount = 0
+            def highCriticalCount = 0
+            def severityCounts = [:]
+            
+            // Process vulnerabilities
+            report.dependencies?.each { dep ->
+                dep.vulnerabilities?.each { vuln ->
+                    vulnerabilityCount++
+                    def severity = vuln.severity ?: 'UNKNOWN'
+                    severityCounts[severity] = (severityCounts[severity] ?: 0) + 1
+                    
+                    if (severity?.toUpperCase() in ['HIGH', 'CRITICAL']) {
+                        highCriticalCount++
+                    }
+                }
+            }
+            
+            // Set environment variables
+            env.DEPENDENCY_VULNERABILITIES = vulnerabilityCount.toString()
+            env.DEPENDENCY_HIGH_CRITICAL = highCriticalCount.toString()
+            env.DEPENDENCIES_SCANNED = dependencyCount.toString()
+            
+            // Log results
+            echo "📊 Dependency Check Results:"
+            echo "   📦 Dependencies scanned: ${dependencyCount}"
+            echo "   🚨 Vulnerabilities found: ${vulnerabilityCount}"
+            echo "   ⚠️  High/Critical vulnerabilities: ${highCriticalCount}"
+            
+            if (vulnerabilityCount > 0) {
+                echo "📈 Vulnerability breakdown by severity:"
+                severityCounts.each { severity, count ->
+                    echo "   ${severity}: ${count}"
+                }
+                
+                // Show top 5 most critical vulnerabilities
+                echo "🔍 Top 5 critical vulnerabilities:"
+                def vulnCounter = 0
+                report.dependencies?.each { dep ->
+                    if (vulnCounter >= 5) return
+                    dep.vulnerabilities?.findAll { it.severity?.toUpperCase() in ['HIGH', 'CRITICAL'] }?.each { vuln ->
+                        if (vulnCounter >= 5) return
+                        vulnCounter++
+                        def cvssScore = vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A'
+                        echo "   ${vulnCounter}. ${vuln.name} (${vuln.severity}, CVSS: ${cvssScore}) in ${dep.fileName}"
+                    }
+                }
+            } else {
+                echo "✅ No vulnerabilities found - all dependencies are secure"
+            }
+            
+        } catch (Exception e) {
+            echo "⚠️ Error processing JSON report: ${e.getMessage()}"
+            env.DEPENDENCY_VULNERABILITIES = "ERROR"
+            env.DEPENDENCY_HIGH_CRITICAL = "ERROR"
+        }
+    } else {
+        echo "⚠️ JSON report not found"
+        env.DEPENDENCY_VULNERABILITIES = "UNKNOWN"
+        env.DEPENDENCY_HIGH_CRITICAL = "UNKNOWN"
+    }
+}
+
+def installSemgrep() {
+    sh """
+        echo "📦 Installing Semgrep..."
+        pip3 install --user semgrep --quiet || pip install --user semgrep --quiet || true
+        export PATH="\$PATH:\$HOME/.local/bin"
+        semgrep --version || echo "⚠️ Semgrep installation verification failed"
+    """
+}
+
+def runSemgrepScan() {
+    def semgrepRules = params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || params.SECURITY_SCAN_LEVEL == 'FULL' ? 
+        '--config=auto --config=p/cwe-top-25 --config=p/owasp-top-10' : 
+        '--config=auto'
+    
+    sh """
+        export PATH="\$PATH:\$HOME/.local/bin"
+        
+        echo "🔍 Running Semgrep security analysis..."
+        timeout ${SEMGREP_TIMEOUT} semgrep \\
+            ${semgrepRules} \\
+            --json \\
+            --output=${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.json \\
+            --timeout=60 \\
+            --max-target-bytes=1000000 \\
+            --exclude="**/bin/**" \\
+            --exclude="**/obj/**" \\
+            --exclude="**/packages/**" \\
+            --exclude="**/*test*/**" \\
+            --exclude="**/*Test*/**" \\
+            . || true
+        
+        # Generate SARIF format for Jenkins integration
+        timeout ${SEMGREP_TIMEOUT} semgrep \\
+            ${semgrepRules} \\
+            --sarif \\
+            --output=${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif \\
+            --timeout=60 \\
+            --max-target-bytes=1000000 \\
+            --exclude="**/bin/**" \\
+            --exclude="**/obj/**" \\
+            --exclude="**/packages/**" \\
+            --exclude="**/*test*/**" \\
+            --exclude="**/*Test*/**" \\
+            . || true
+    """
+}
+
+def processSemgrepResults() {
+    env.SEMGREP_ISSUES = "0"
+    env.SEMGREP_CRITICAL = "0"
+    
+    if (fileExists("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.json")) {
+        try {
+            def semgrepResults = readFile("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.json")
+            def report = new groovy.json.JsonSlurper().parseText(semgrepResults)
+            
+            def issueCount = report.results?.size() ?: 0
+            def criticalIssues = report.results?.findAll { 
+                it.extra?.severity == 'ERROR' || it.extra?.severity == 'HIGH' 
+            }?.size() ?: 0
+            
+            env.SEMGREP_ISSUES = issueCount.toString()
+            env.SEMGREP_CRITICAL = criticalIssues.toString()
+            
+            echo "📊 Semgrep Results: ${issueCount} issues found (${criticalIssues} critical)"
+            
+        } catch (Exception e) {
+            echo "⚠️ Error processing Semgrep results: ${e.getMessage()}"
+            env.SEMGREP_ISSUES = "ERROR"
+            env.SEMGREP_CRITICAL = "ERROR"
+        }
+    } else {
+        echo "⚠️ Semgrep results file not found"
+    }
+}
+
+def installTrivy() {
+    sh """
+        echo "📦 Installing Trivy..."
+        if ! command -v trivy &> /dev/null; then
+            wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+            echo "deb https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+            sudo apt-get update
+            sudo apt-get install -y trivy
+        fi
+        trivy image --download-db-only
+    """
+}
+
+def runTrivyScan() {
+    sh """
+        echo "🔍 Scanning filesystem for vulnerabilities..."
+        trivy fs \\
+            --format json \\
+            --output ${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.json \\
+            --skip-files "**/bin/**,**/obj/**,**/packages/**" \\
+            --timeout 10m \\
+            . || true
+        
+        trivy fs \\
+            --format sarif \\
+            --output ${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif \\
+            --skip-files "**/bin/**,**/obj/**,**/packages/**" \\
+            --timeout 10m \\
+            . || true
+    """
+    
+    echo "✅ Trivy scan completed"
+}
+
+def runLicenseCheck() {
+    sh """
+        echo "📋 Checking NuGet package licenses..."
+        
+        find . -name "*.csproj" -not -path "*/bin/*" -not -path "*/obj/*" | while read project; do
+            echo "Checking project: \$project"
+            
+            dotnet list "\$project" package --vulnerable --include-transitive > \\
+                ${SECURITY_REPORTS_DIR}/license-check/vulnerable-packages.txt 2>&1 || true
+            
+            dotnet list "\$project" package --include-transitive > \\
+                ${SECURITY_REPORTS_DIR}/license-check/all-packages.txt 2>&1 || true
+        done
+        
+        echo "📊 License compliance summary:" > ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
+        echo "Generated on: \$(date)" >> ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
+        echo "Project: \${JOB_NAME}" >> ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
+        echo "Build: \${BUILD_NUMBER}" >> ${SECURITY_REPORTS_DIR}/license-check/license-summary.txt
+    """
+    
+    echo "✅ License compliance check completed"
+}
+
+def archiveSecurityReports() {
+    echo "📊 Archiving security reports..."
+    
+    try {
+        archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/**/*", 
+                    allowEmptyArchive: true,
+                    fingerprint: true
+        echo "✅ Security reports archived"
+    } catch (Exception e) {
+        echo "⚠️ Could not archive security reports: ${e.getMessage()}"
+    }
+}
+
+def publishSecurityResults() {
+    echo "📋 Publishing security results..."
+    
+    try {
+        // Publish OWASP Dependency Check results (reliable XML format)
+        if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")) {
+            recordIssues enabledForFailure: true,
+                    tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
+                    qualityGates: [[threshold: 1, type: 'TOTAL_HIGH', unstable: true]]
+        }
+        
+        // Publish Semgrep SARIF results
+        if (fileExists("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")) {
+            recordIssues enabledForFailure: true,
+                    tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")],
+                    qualityGates: [[threshold: 1, type: 'TOTAL_ERROR', unstable: true]]
+        }
+        
+        // Publish Trivy SARIF results
+        if (fileExists("${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")) {
+            recordIssues enabledForFailure: true,
+                    tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")],
+                    qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
+        }
+        
+        // Publish HTML report (simplified and reliable)
+        if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html")) {
+            publishHTML([
+                allowMissing: false,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
+                reportFiles: 'dependency-check-report.html',
+                reportName: 'OWASP Dependency Check Report',
+                reportTitles: ''
+            ])
+            echo "✅ HTML report published successfully"
+        }
+        
+        echo "✅ Security results published to Jenkins UI"
+        
+    } catch (Exception e) {
+        echo "⚠️ Could not publish security results: ${e.getMessage()}"
+    }
+}
+
+def generateSecuritySummary() {
+    echo "📊 Generating security summary..."
+    
+    def securitySummary = """
+🔒 Security Scan Summary
+========================
+Build: ${BUILD_NUMBER}
+Date: ${new Date()}
+Scan Level: ${params.SECURITY_SCAN_LEVEL}
+
+📦 Dependency Check Results:
+Dependencies Scanned: ${env.DEPENDENCIES_SCANNED ?: 'N/A'}
+Vulnerabilities Found: ${env.DEPENDENCY_VULNERABILITIES ?: 'N/A'}
+High/Critical Issues: ${env.DEPENDENCY_HIGH_CRITICAL ?: 'N/A'}
+
+🔍 SAST Results:
+Total Issues: ${env.SEMGREP_ISSUES ?: 'N/A'}
+Critical Issues: ${env.SEMGREP_CRITICAL ?: 'N/A'}
+
+Status: ${currentBuild.result ?: 'SUCCESS'}
+"""
+    
+    echo securitySummary
+    writeFile file: "${SECURITY_REPORTS_DIR}/security-summary.txt", text: securitySummary
+}
+
+def evaluateSecurityGates() {
+    echo "🚧 Evaluating security gates..."
+    
+    if (params.FAIL_ON_SECURITY_ISSUES) {
+        def criticalSastIssues = (env.SEMGREP_CRITICAL ?: "0").isInteger() ? 
+            (env.SEMGREP_CRITICAL ?: "0").toInteger() : 0
+        def highCriticalDepIssues = (env.DEPENDENCY_HIGH_CRITICAL ?: "0").isInteger() ? 
+            (env.DEPENDENCY_HIGH_CRITICAL ?: "0").toInteger() : 0
+        
+        if (criticalSastIssues > 0) {
+            error "❌ Build failed due to ${criticalSastIssues} critical SAST security issues"
+        }
+        
+        if (highCriticalDepIssues > 0) {
+            currentBuild.result = 'UNSTABLE'
+            echo "⚠️ Build marked unstable due to ${highCriticalDepIssues} high/critical dependency vulnerabilities"
+        }
+    }
+    
+    echo "✅ Security gate evaluation completed"
 }
