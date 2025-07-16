@@ -1554,7 +1554,7 @@ def publishLintResults() {
         aggregatingResults: false,
         tools: [
             groovyScript(
-                parserId: 'dotnet-format',
+                parserId: 'violations',
                 pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json",
                 reportEncoding: 'UTF-8'
             )
