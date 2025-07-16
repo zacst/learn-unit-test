@@ -1528,51 +1528,215 @@ def runLinting() {
             error "❌ Could not find a solution file (.sln) in the workspace."
         }
         
+        // Install dotnet-format tool
         sh """
             dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
             export PATH="\$PATH:\$HOME/.dotnet/tools"
         """
         
-        // Run format check and capture exit code
+        // Run format check and capture both exit code and output
+        def formatOutput = ""
         def formatResult = sh(
             script: """
                 export PATH="\$PATH:\$HOME/.dotnet/tools"
-                dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
+                dotnet format '${solutionFile}' --verify-no-changes --verbosity diagnostic 2>&1 | tee format-output.txt
             """,
             returnStatus: true
         )
         
+        // Read the output for processing
+        formatOutput = readFile('format-output.txt').trim()
+        
+        // Parse violations and create custom report
+        def violations = parseFormatViolations(formatOutput)
+        createCustomLintReport(violations)
+        
         if (formatResult == 0) {
             echo "✅ Code style is consistent."
         } else {
-            echo "ℹ️ Formatting suggestions available. Check the warnings for details."
+            echo "ℹ️ Found ${violations.size()} formatting issues. Check the warnings for details."
+            // Set build status to unstable rather than failed
+            currentBuild.result = 'UNSTABLE'
         }
         
     } catch (Exception e) {
         echo "❌ Linting check encountered an error: ${e.message}"
+        currentBuild.result = 'UNSTABLE'
     } finally {
         publishLintResults()
-        archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
+        archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json,format-output.txt", allowEmptyArchive: true
     }
 }
 
-def publishLintResults() {
-    if (fileExists("${LINTER_REPORTS_DIR}/dotnet-format-report.json")) {
-        echo "📊 Publishing linting results..."
-        
-        try {
-            recordIssues(
-                enabledForFailure: false,
-                aggregatingResults: false,
-                tools: [
-                    msBuild(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
-                ],
-                // No quality gates = no build status change
-                qualityGates: []
-            )
-        } catch (Exception e) {
-            echo "MSBuild parser failed: ${e.message}"
+def parseFormatViolations(String output) {
+    def violations = []
+    def lines = output.split('\n')
+    
+    for (line in lines) {
+        if (line.contains('error WHITESPACE:')) {
+            def matcher = line =~ /^(.+?)\((\d+),(\d+)\): error WHITESPACE: (.+?) \[(.+?)\]$/
+            if (matcher.find()) {
+                violations << [
+                    file: matcher.group(1),
+                    line: matcher.group(2),
+                    column: matcher.group(3),
+                    message: matcher.group(4),
+                    project: matcher.group(5)
+                ]
+            }
         }
+    }
+    
+    return violations
+}
+
+def createCustomLintReport(violations) {
+    def report = [
+        version: "1.0",
+        timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"),
+        tool: "dotnet-format",
+        issues: violations.collect { violation ->
+            [
+                file: violation.file,
+                line: violation.line as Integer,
+                column: violation.column as Integer,
+                severity: "warning",
+                message: violation.message,
+                rule: "WHITESPACE",
+                category: "Style"
+            ]
+        }
+    ]
+    
+    writeJSON file: "${LINTER_REPORTS_DIR}/custom-lint-report.json", json: report
+}
+
+def publishLintResults() {
+    echo "📊 Publishing linting results..."
+    
+    try {
+        // Try multiple report formats
+        def reportFiles = [
+            "${LINTER_REPORTS_DIR}/dotnet-format-report.json",
+            "${LINTER_REPORTS_DIR}/custom-lint-report.json"
+        ]
+        
+        for (reportFile in reportFiles) {
+            if (fileExists(reportFile)) {
+                echo "Processing report: ${reportFile}"
+                
+                // Use checkstyle format which is more widely supported
+                if (reportFile.contains("custom-lint-report")) {
+                    publishCheckstyleReport(reportFile)
+                } else {
+                    recordIssues(
+                        enabledForFailure: false,
+                        aggregatingResults: false,
+                        tools: [msBuild(pattern: reportFile)],
+                        qualityGates: [
+                            [threshold: 1, type: 'TOTAL', unstable: true],
+                            [threshold: 10, type: 'TOTAL', failed: true]
+                        ]
+                    )
+                }
+            }
+        }
+        
+    } catch (Exception e) {
+        echo "⚠️ Report publishing failed: ${e.message}"
+        // Continue without failing the build
+    }
+}
+
+def publishCheckstyleReport(String reportFile) {
+    // Convert custom JSON to Checkstyle XML format
+    def jsonReport = readJSON file: reportFile
+    def checkstyleXml = convertToCheckstyle(jsonReport)
+    
+    writeFile file: "${LINTER_REPORTS_DIR}/checkstyle-report.xml", text: checkstyleXml
+    
+    recordIssues(
+        enabledForFailure: false,
+        tools: [checkStyle(pattern: "${LINTER_REPORTS_DIR}/checkstyle-report.xml")],
+        qualityGates: [
+            [threshold: 1, type: 'TOTAL', unstable: true],
+            [threshold: 10, type: 'TOTAL', failed: true]
+        ]
+    )
+}
+
+def convertToCheckstyle(jsonReport) {
+    def xml = new StringBuilder()
+    xml.append('<?xml version="1.0" encoding="UTF-8"?>\n')
+    xml.append('<checkstyle version="8.0">\n')
+    
+    def fileGroups = jsonReport.issues.groupBy { it.file }
+    
+    fileGroups.each { fileName, issues ->
+        xml.append("  <file name=\"${fileName}\">\n")
+        issues.each { issue ->
+            xml.append("    <error line=\"${issue.line}\" column=\"${issue.column}\" ")
+            xml.append("severity=\"${issue.severity}\" message=\"${issue.message}\" ")
+            xml.append("source=\"${issue.rule}\"/>\n")
+        }
+        xml.append("  </file>\n")
+    }
+    
+    xml.append('</checkstyle>\n')
+    return xml.toString()
+}
+
+// Alternative simpler approach - just fix the formatting
+def runLintingWithAutofix() {
+    echo "💅 Running .NET Linter with auto-fix..."
+    try {
+        sh "mkdir -p ${LINTER_REPORTS_DIR}"
+        
+        def solutionFile = sh(script: "find . -name '*.sln' -print -quit", returnStdout: true).trim()
+        if (solutionFile.isEmpty()) {
+            error "❌ Could not find a solution file (.sln) in the workspace."
+        }
+        
+        sh """
+            dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
+            export PATH="\$PATH:\$HOME/.dotnet/tools"
+        """
+        
+        // First, try to fix issues automatically
+        def fixResult = sh(
+            script: """
+                export PATH="\$PATH:\$HOME/.dotnet/tools"
+                dotnet format '${solutionFile}' --include-generated
+            """,
+            returnStatus: true
+        )
+        
+        if (fixResult == 0) {
+            echo "✅ Code formatting applied successfully."
+            
+            // Check if there are any remaining issues
+            def verifyResult = sh(
+                script: """
+                    export PATH="\$PATH:\$HOME/.dotnet/tools"
+                    dotnet format '${solutionFile}' --verify-no-changes
+                """,
+                returnStatus: true
+            )
+            
+            if (verifyResult == 0) {
+                echo "✅ All formatting issues resolved."
+            } else {
+                echo "⚠️ Some formatting issues remain after auto-fix."
+                currentBuild.result = 'UNSTABLE'
+            }
+        } else {
+            echo "⚠️ Auto-fix encountered issues."
+            currentBuild.result = 'UNSTABLE'
+        }
+        
+    } catch (Exception e) {
+        echo "❌ Linting check encountered an error: ${e.message}"
+        currentBuild.result = 'UNSTABLE'
     }
 }
 
