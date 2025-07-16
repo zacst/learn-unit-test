@@ -2028,7 +2028,7 @@ print(f'Total violations found: {len(violations)}')
 if violations:
     for violation in violations:
         transitive = ' (transitive)' if violation.get('is_transitive', False) else ''
-        print(f'  - {violation[\"package\"]} ({violation[\"version\"]}): {violation[\"license\"]}{transitive}')
+        print(f'  - {violation["package"]} ({violation["version"]}): {violation["license"]}{transitive}')
     sys.exit(1)
 else:
     print('No license violations found')
