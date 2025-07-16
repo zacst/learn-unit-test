@@ -1184,34 +1184,44 @@ def processSemgrepResults() {
 def installTrivy() {
     sh """
         echo "📦 Installing Trivy..."
-        if ! command -v trivy &> /dev/null; then
-            wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-            echo "deb https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-            sudo apt-get update
-            sudo apt-get install -y trivy
+        TRIVY_VERSION=0.50.0
+        TRIVY_DIR=\$(pwd)/trivy-bin
+        mkdir -p \$TRIVY_DIR
+
+        if [ ! -f \$TRIVY_DIR/trivy ]; then
+            wget -q https://github.com/aquasecurity/trivy/releases/download/v\$TRIVY_VERSION/trivy_\${TRIVY_VERSION}_Linux-64bit.tar.gz
+            tar -xzf trivy_\${TRIVY_VERSION}_Linux-64bit.tar.gz -C \$TRIVY_DIR trivy
+            chmod +x \$TRIVY_DIR/trivy
+            export PATH=\$TRIVY_DIR:\$PATH
         fi
-        trivy image --download-db-only
+
+        \$TRIVY_DIR/trivy --version
+        \$TRIVY_DIR/trivy image --download-db-only
     """
 }
 
 def runTrivyScan() {
     sh """
         echo "🔍 Scanning filesystem for vulnerabilities..."
-        trivy fs \\
+
+        TRIVY_DIR=\$(pwd)/trivy-bin
+        mkdir -p ${SECURITY_REPORTS_DIR}/trivy
+
+        \$TRIVY_DIR/trivy fs \\
             --format json \\
             --output ${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.json \\
-            --skip-files "**/bin/**,**/obj/**,**/packages/**" \\
+            --skip-dirs bin,obj,packages \\
             --timeout 10m \\
             . || true
-        
-        trivy fs \\
+
+        \$TRIVY_DIR/trivy fs \\
             --format sarif \\
             --output ${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif \\
-            --skip-files "**/bin/**,**/obj/**,**/packages/**" \\
+            --skip-dirs bin,obj,packages \\
             --timeout 10m \\
             . || true
     """
-    
+
     echo "✅ Trivy scan completed"
 }
 
