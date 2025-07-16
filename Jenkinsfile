@@ -1532,7 +1532,7 @@ def runLinting() {
         sh """
             dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
             export PATH="\$PATH:\$HOME/.dotnet/tools"
-            dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
+            dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.xml --output-format xml
         """
         echo "✅ Linting passed. Code style is consistent."
     } catch (Exception e) {
