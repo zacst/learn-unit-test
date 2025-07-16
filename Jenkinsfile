@@ -1532,15 +1532,15 @@ def runLinting() {
         sh """
             dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
             export PATH="\$PATH:\$HOME/.dotnet/tools"
-            dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.xml --output-format xml
+            dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
         """
         echo "✅ Linting passed. Code style is consistent."
     } catch (Exception e) {
         currentBuild.result = 'UNSTABLE'
         echo "❌ Linting Check Failed. Code does not adhere to style guidelines."
         
-        // Archive the XML report (changed from .json to .xml)
-        archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.xml", allowEmptyArchive: true
+        // Archive the JSON report
+        archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
     } finally {
         // Publish results to Jenkins dashboard
         publishLintResults()
@@ -1548,54 +1548,25 @@ def runLinting() {
 }
 
 def publishLintResults() {
-    // Look for XML report instead of JSON (changed filename)
-    if (fileExists("${LINTER_REPORTS_DIR}/dotnet-format-report.xml")) {
+    if (fileExists("${LINTER_REPORTS_DIR}/dotnet-format-report.json")) {
         echo "📊 Publishing linting results..."
         
-        // Try different built-in parsers with XML file
         try {
             recordIssues(
                 enabledForFailure: true,
                 aggregatingResults: false,
                 tools: [
-                    // CheckStyle parser typically works well with XML
-                    checkStyle(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.xml")
+                    // MSBuild parser - specifically designed for .NET tools
+                    msBuild(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
                 ],
                 qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
             )
-        } catch (Exception e1) {
-            echo "CheckStyle parser failed: ${e1.message}"
-            try {
-                recordIssues(
-                    enabledForFailure: true,
-                    aggregatingResults: false,
-                    tools: [
-                        // PMD parser also supports XML
-                        pmdParser(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.xml")
-                    ],
-                    qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
-                )
-            } catch (Exception e2) {
-                echo "PMD parser failed: ${e2.message}"
-                try {
-                    // Try SpotBugs parser as another XML option
-                    recordIssues(
-                        enabledForFailure: true,
-                        aggregatingResults: false,
-                        tools: [
-                            spotBugs(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.xml")
-                        ],
-                        qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
-                    )
-                } catch (Exception e3) {
-                    echo "SpotBugs parser failed: ${e3.message}"
-                    // Fallback to just archiving XML files
-                    archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.xml", allowEmptyArchive: true
-                }
-            }
+        } catch (Exception e) {
+            echo "MSBuild parser failed: ${e.message}"
+            archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
         }
     } else {
-        echo "⚠️ No linting report found at ${LINTER_REPORTS_DIR}/dotnet-format-report.xml"
+        echo "⚠️ No linting report found at ${LINTER_REPORTS_DIR}/dotnet-format-report.json"
     }
 }
 
@@ -1667,10 +1638,128 @@ def runLicenseCheck() {
     try {
         sh """
             mkdir -p ${SECURITY_REPORTS_DIR}/license-check/
-            dotnet tool install --global dotnet-project-licenses || true
             
             echo "🔍 Scanning solution for dependency licenses..."
-            \$HOME/.dotnet/tools/dotnet-project-licenses --input '${solutionFile}' --output-directory ${SECURITY_REPORTS_DIR}/license-check/ --export-license-texts --format json --verbose
+            
+            # Get package list with versions
+            dotnet list '${solutionFile}' package --format json > ${SECURITY_REPORTS_DIR}/license-check/packages-list.json
+            
+            # Enhanced Python script to get license info from NuGet API
+            python3 -c "
+import json
+import urllib.request
+import urllib.parse
+import xml.etree.ElementTree as ET
+import os
+import sys
+import time
+
+def get_package_license_from_nuget(package_name, version):
+    '''Get license information from NuGet API'''
+    try:
+        # Try the v3 API first
+        api_url = f'https://api.nuget.org/v3-flatcontainer/{package_name.lower()}/index.json'
+        with urllib.request.urlopen(api_url, timeout=10) as response:
+            if response.status == 200:
+                # Get package metadata
+                metadata_url = f'https://api.nuget.org/v3/registration5-semver1/{package_name.lower()}/index.json'
+                with urllib.request.urlopen(metadata_url, timeout=10) as meta_response:
+                    if meta_response.status == 200:
+                        meta_data = json.loads(meta_response.read().decode('utf-8'))
+                        
+                        # Look for license info in the metadata
+                        for item in meta_data.get('items', []):
+                            for entry in item.get('items', []):
+                                catalog_entry = entry.get('catalogEntry', {})
+                                if catalog_entry.get('version') == version:
+                                    license_url = catalog_entry.get('licenseUrl', '')
+                                    license_expr = catalog_entry.get('licenseExpression', '')
+                                    
+                                    if license_expr:
+                                        return license_expr
+                                    elif 'mit' in license_url.lower():
+                                        return 'MIT'
+                                    elif 'apache' in license_url.lower():
+                                        return 'Apache-2.0'
+                                    elif 'bsd' in license_url.lower():
+                                        return 'BSD-3-Clause'
+                                    elif license_url:
+                                        return f'Custom: {license_url}'
+    except Exception as e:
+        print(f'Error getting license for {package_name}: {e}')
+    
+    return 'Unknown'
+
+def process_packages():
+    '''Process the packages and get license information'''
+    packages_with_licenses = []
+    
+    try:
+        with open('${SECURITY_REPORTS_DIR}/license-check/packages-list.json', 'r') as f:
+            data = json.load(f)
+        
+        for project in data.get('projects', []):
+            project_path = project.get('path', '')
+            
+            for framework in project.get('frameworks', []):
+                framework_name = framework.get('framework', '')
+                
+                # Process top-level packages
+                for package in framework.get('topLevelPackages', []):
+                    package_name = package.get('id', '')
+                    package_version = package.get('requestedVersion', '')
+                    
+                    if package_name and package_version:
+                        print(f'Getting license for {package_name} {package_version}...')
+                        license_type = get_package_license_from_nuget(package_name, package_version)
+                        
+                        packages_with_licenses.append({
+                            'PackageName': package_name,
+                            'PackageVersion': package_version,
+                            'LicenseType': license_type,
+                            'Project': project_path,
+                            'Framework': framework_name,
+                            'IsTransitive': False
+                        })
+                        
+                        # Small delay to avoid rate limiting
+                        time.sleep(0.1)
+                
+                # Process transitive packages
+                for package in framework.get('transitivePackages', []):
+                    package_name = package.get('id', '')
+                    package_version = package.get('requestedVersion', '')
+                    
+                    if package_name and package_version:
+                        print(f'Getting license for transitive {package_name} {package_version}...')
+                        license_type = get_package_license_from_nuget(package_name, package_version)
+                        
+                        packages_with_licenses.append({
+                            'PackageName': package_name,
+                            'PackageVersion': package_version,
+                            'LicenseType': license_type,
+                            'Project': project_path,
+                            'Framework': framework_name,
+                            'IsTransitive': True
+                        })
+                        
+                        # Small delay to avoid rate limiting
+                        time.sleep(0.1)
+    
+    except Exception as e:
+        print(f'Error processing packages: {e}')
+        return []
+    
+    # Save the results
+    with open('${SECURITY_REPORTS_DIR}/license-check/packages-with-licenses.json', 'w') as f:
+        json.dump(packages_with_licenses, f, indent=2)
+    
+    print(f'Processed {len(packages_with_licenses)} packages')
+    return packages_with_licenses
+
+if __name__ == '__main__':
+    process_packages()
+"
         """
         
         // Validate licenses against policy
@@ -1705,24 +1794,32 @@ with open('allowed-licenses.json', 'r') as f:
 report_dir = '${SECURITY_REPORTS_DIR}/license-check/'
 violations = []
 
-for file in os.listdir(report_dir):
-    if file.endswith('.json'):
-        with open(os.path.join(report_dir, file), 'r') as f:
-            try:
-                data = json.load(f)
-                if isinstance(data, list):
-                    for package in data:
-                        license_type = package.get('LicenseType', 'Unknown')
-                        package_name = package.get('PackageName', 'Unknown')
-                        
-                        if license_type not in allowed and license_type != 'Unknown':
-                            violations.append({
-                                'package': package_name,
-                                'license': license_type,
-                                'version': package.get('PackageVersion', 'Unknown')
-                            })
-            except:
-                continue
+# Look for our enhanced license file
+license_file = os.path.join(report_dir, 'packages-with-licenses.json')
+if os.path.exists(license_file):
+    with open(license_file, 'r') as f:
+        packages = json.load(f)
+    
+    for package in packages:
+        license_type = package.get('LicenseType', 'Unknown')
+        package_name = package.get('PackageName', 'Unknown')
+        package_version = package.get('PackageVersion', 'Unknown')
+        
+        # Skip unknown licenses for now (manual review needed)
+        if license_type != 'Unknown' and license_type not in allowed:
+            # Handle custom license URLs
+            if license_type.startswith('Custom:'):
+                license_display = license_type
+            else:
+                license_display = license_type
+            
+            violations.append({
+                'package': package_name,
+                'license': license_display,
+                'version': package_version,
+                'project': package.get('Project', ''),
+                'is_transitive': package.get('IsTransitive', False)
+            })
 
 # Generate violations report
 violations_file = '${SECURITY_REPORTS_DIR}/license-violations.json'
@@ -1733,8 +1830,11 @@ with open(violations_file, 'w') as f:
         'allowed_licenses': allowed
     }, f, indent=2)
 
+print(f'Total violations found: {len(violations)}')
 if violations:
-    print(f'Found {len(violations)} license violations')
+    for violation in violations:
+        transitive = ' (transitive)' if violation.get('is_transitive', False) else ''
+        print(f'  - {violation[\"package\"]} ({violation[\"version\"]}): {violation[\"license\"]}{transitive}')
     sys.exit(1)
 else:
     print('No license violations found')
@@ -1757,7 +1857,8 @@ def publishLicenseResults() {
             // Convert JSON to a format that Jenkins can understand
             def warningsText = ""
             violations.violations.each { violation ->
-                warningsText += "WARNING: License violation in package '${violation.package}' version '${violation.version}' - License: '${violation.license}' is not in allowed list\n"
+                def transitiveNote = violation.is_transitive ? " (transitive dependency)" : ""
+                warningsText += "WARNING: License violation in package '${violation.package}' version '${violation.version}' - License: '${violation.license}' is not in allowed list${transitiveNote}\n"
             }
             
             // Write to a simple text file for Jenkins warnings plugin
