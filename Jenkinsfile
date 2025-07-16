@@ -1300,14 +1300,14 @@ def publishSecurityResults() {
         // Publish Semgrep SARIF results
         if (fileExists("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")) {
             recordIssues enabledForFailure: true,
-                       tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")],
+                       tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif", id: 'semgrep')],
                        qualityGates: [[threshold: 1, type: 'TOTAL_ERROR', unstable: true]]
         }
         
         // Publish Trivy SARIF results
         if (fileExists("${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")) {
             recordIssues enabledForFailure: true,
-                       tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")],
+                       tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif", id: 'trivy')],
                        qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
         }
         
