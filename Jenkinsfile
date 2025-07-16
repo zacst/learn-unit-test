@@ -1532,20 +1532,35 @@ def runLinting() {
         sh """
             dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
             export PATH="\$PATH:\$HOME/.dotnet/tools"
-
-            # This command will correctly fail if changes are needed.
             dotnet format '${solutionFile}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format-report.json
         """
         echo "✅ Linting passed. Code style is consistent."
     } catch (Exception e) {
-        // Set build to UNSTABLE instead of failing it outright.
-        // This allows other parallel stages (like Trivy) to complete.
         currentBuild.result = 'UNSTABLE'
-        echo "❌ Linting Check Failed. Code does not adhere to style guidelines. See console output for details."
+        echo "❌ Linting Check Failed. Code does not adhere to style guidelines."
         
-        // Archive the report so you can see what needs to be fixed.
+        // Archive the report
         archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
+    } finally {
+        // Publish results to Jenkins dashboard
+        publishLintResults()
     }
+}
+
+def publishLintResults() {
+    // Parse and publish the dotnet-format report
+    recordIssues(
+        enabledForFailure: true,
+        aggregatingResults: false,
+        tools: [
+            groovyScript(
+                parserId: 'dotnet-format',
+                pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json",
+                reportEncoding: 'UTF-8'
+            )
+        ],
+        qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
+    )
 }
 
 /**
@@ -1607,7 +1622,6 @@ def runLicenseCheck() {
     }
     '''
     
-    // Find the solution file to provide context
     def solutionFile = sh(script: "find . -name '*.sln' -print -quit", returnStdout: true).trim()
     if (solutionFile.isEmpty()) {
         error "❌ Could not find a solution file (.sln) for the license check."
@@ -1616,23 +1630,100 @@ def runLicenseCheck() {
     
     try {
         sh """
-            # Install the tool first
+            mkdir -p ${SECURITY_REPORTS_DIR}/license-check/
             dotnet tool install --global dotnet-project-licenses || true
-
-            # Execute the tool using its full path to avoid PATH issues.
-            # The HOME variable is correctly set in Jenkins agent environments.
+            
             echo "🔍 Scanning solution for dependency licenses..."
             \$HOME/.dotnet/tools/dotnet-project-licenses --input '${solutionFile}' --output-directory ${SECURITY_REPORTS_DIR}/license-check/ --export-license-texts --format json --verbose
         """
+        
+        // Validate licenses against policy
+        validateLicenses()
         echo "✅ All dependency licenses are compliant."
+        
     } catch (Exception e) {
-        // Catch the failure from the license-checker to prevent a hard stop
         echo "❌ License check failed: ${e.getMessage()}"
         if (params.FAIL_ON_SECURITY_ISSUES) {
             error("Failing build due to non-compliant licenses.")
         } else {
-            // Mark the build as unstable instead of failing it
             currentBuild.result = 'UNSTABLE'
         }
+    } finally {
+        // Always publish results to dashboard
+        publishLicenseResults()
     }
+}
+
+def validateLicenses() {
+    sh """
+        python3 -c "
+import json
+import os
+import sys
+
+# Load allowed licenses
+with open('allowed-licenses.json', 'r') as f:
+    allowed = json.load(f)['allowed']
+
+# Process license report
+report_dir = '${SECURITY_REPORTS_DIR}/license-check/'
+violations = []
+
+for file in os.listdir(report_dir):
+    if file.endswith('.json'):
+        with open(os.path.join(report_dir, file), 'r') as f:
+            try:
+                data = json.load(f)
+                if isinstance(data, list):
+                    for package in data:
+                        license_type = package.get('LicenseType', 'Unknown')
+                        package_name = package.get('PackageName', 'Unknown')
+                        
+                        if license_type not in allowed and license_type != 'Unknown':
+                            violations.append({
+                                'package': package_name,
+                                'license': license_type,
+                                'version': package.get('PackageVersion', 'Unknown')
+                            })
+            except:
+                continue
+
+# Generate violations report
+violations_file = '${SECURITY_REPORTS_DIR}/license-violations.json'
+with open(violations_file, 'w') as f:
+    json.dump({
+        'violations': violations,
+        'total_violations': len(violations),
+        'allowed_licenses': allowed
+    }, f, indent=2)
+
+if violations:
+    print(f'Found {len(violations)} license violations')
+    sys.exit(1)
+else:
+    print('No license violations found')
+"
+    """
+}
+
+def publishLicenseResults() {
+    // Archive the raw reports
+    archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/license-check/**/*", allowEmptyArchive: true
+    archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/license-violations.json", allowEmptyArchive: true
+    
+    // Convert to warnings format for dashboard
+    recordIssues(
+        enabledForFailure: true,
+        aggregatingResults: false,
+        tools: [
+            groovyScript(
+                parserId: 'license-violations',
+                pattern: "${SECURITY_REPORTS_DIR}/license-violations.json",
+                reportEncoding: 'UTF-8'
+            )
+        ],
+        qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]],
+        name: 'License Compliance',
+        id: 'license-check'
+    )
 }
