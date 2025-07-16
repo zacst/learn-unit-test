@@ -1528,7 +1528,7 @@ def runLinting() {
             error "❌ Could not find a solution file (.sln) in the workspace."
         }
         echo "Found solution file: ${solutionFile}"
-
+        
         sh """
             dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
             export PATH="\$PATH:\$HOME/.dotnet/tools"
@@ -1539,8 +1539,8 @@ def runLinting() {
         currentBuild.result = 'UNSTABLE'
         echo "❌ Linting Check Failed. Code does not adhere to style guidelines."
         
-        // Archive the report
-        archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
+        // Archive the XML report (changed from .json to .xml)
+        archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.xml", allowEmptyArchive: true
     } finally {
         // Publish results to Jenkins dashboard
         publishLintResults()
@@ -1548,16 +1548,18 @@ def runLinting() {
 }
 
 def publishLintResults() {
-    if (fileExists("${LINTER_REPORTS_DIR}/dotnet-format-report.json")) {
+    // Look for XML report instead of JSON (changed filename)
+    if (fileExists("${LINTER_REPORTS_DIR}/dotnet-format-report.xml")) {
         echo "📊 Publishing linting results..."
         
-        // Try different built-in parsers
+        // Try different built-in parsers with XML file
         try {
             recordIssues(
                 enabledForFailure: true,
                 aggregatingResults: false,
                 tools: [
-                    checkStyle(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
+                    // CheckStyle parser typically works well with XML
+                    checkStyle(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.xml")
                 ],
                 qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
             )
@@ -1568,16 +1570,32 @@ def publishLintResults() {
                     enabledForFailure: true,
                     aggregatingResults: false,
                     tools: [
-                        pmdParser(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.json")
+                        // PMD parser also supports XML
+                        pmdParser(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.xml")
                     ],
                     qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
                 )
             } catch (Exception e2) {
                 echo "PMD parser failed: ${e2.message}"
-                // Fallback to just archiving
-                archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.json", allowEmptyArchive: true
+                try {
+                    // Try SpotBugs parser as another XML option
+                    recordIssues(
+                        enabledForFailure: true,
+                        aggregatingResults: false,
+                        tools: [
+                            spotBugs(pattern: "${LINTER_REPORTS_DIR}/dotnet-format-report.xml")
+                        ],
+                        qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
+                    )
+                } catch (Exception e3) {
+                    echo "SpotBugs parser failed: ${e3.message}"
+                    // Fallback to just archiving XML files
+                    archiveArtifacts artifacts: "${LINTER_REPORTS_DIR}/*.xml", allowEmptyArchive: true
+                }
             }
         }
+    } else {
+        echo "⚠️ No linting report found at ${LINTER_REPORTS_DIR}/dotnet-format-report.xml"
     }
 }
 
@@ -1729,19 +1747,40 @@ def publishLicenseResults() {
     archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/license-check/**/*", allowEmptyArchive: true
     archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/license-violations.json", allowEmptyArchive: true
     
-    // Convert to warnings format for dashboard
-    recordIssues(
-        enabledForFailure: true,
-        aggregatingResults: false,
-        tools: [
-            groovyScript(
-                parserId: 'license-violations',
-                pattern: "${SECURITY_REPORTS_DIR}/license-violations.json",
-                reportEncoding: 'UTF-8'
+    // Check if violations file exists and has content
+    def violationsFile = "${SECURITY_REPORTS_DIR}/license-violations.json"
+    if (fileExists(violationsFile)) {
+        def violationsContent = readFile(violationsFile)
+        def violations = readJSON text: violationsContent
+        
+        if (violations.total_violations > 0) {
+            // Convert JSON to a format that Jenkins can understand
+            def warningsText = ""
+            violations.violations.each { violation ->
+                warningsText += "WARNING: License violation in package '${violation.package}' version '${violation.version}' - License: '${violation.license}' is not in allowed list\n"
+            }
+            
+            // Write to a simple text file for Jenkins warnings plugin
+            writeFile file: "${SECURITY_REPORTS_DIR}/license-warnings.txt", text: warningsText
+            
+            // Use a simple approach to record issues
+            recordIssues(
+                enabledForFailure: false,
+                aggregatingResults: false,
+                tools: [
+                    issues(
+                        pattern: "${SECURITY_REPORTS_DIR}/license-warnings.txt",
+                        name: 'License Violations'
+                    )
+                ],
+                qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]],
+                name: 'License Compliance',
+                id: 'license-check'
             )
-        ],
-        qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]],
-        name: 'License Compliance',
-        id: 'license-check'
-    )
+        } else {
+            echo "✅ No license violations found - skipping warnings publication"
+        }
+    } else {
+        echo "⚠️ License violations file not found - skipping warnings publication"
+    }
 }
