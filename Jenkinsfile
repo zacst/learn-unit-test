@@ -1207,6 +1207,7 @@ def runTrivyScan() {
         TRIVY_DIR=\$(pwd)/trivy-bin
         mkdir -p ${SECURITY_REPORTS_DIR}/trivy
 
+        # JSON output
         \$TRIVY_DIR/trivy fs \\
             --format json \\
             --output ${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.json \\
@@ -1214,9 +1215,19 @@ def runTrivyScan() {
             --timeout 10m \\
             . || true
 
+        # SARIF output (for recordIssues, optional)
         \$TRIVY_DIR/trivy fs \\
             --format sarif \\
             --output ${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif \\
+            --skip-dirs bin,obj,packages \\
+            --timeout 10m \\
+            . || true
+
+        # HTML output (for publishHTML plugin)
+        \$TRIVY_DIR/trivy fs \\
+            --format template \\
+            --template "@contrib/html.tpl" \\
+            --output ${SECURITY_REPORTS_DIR}/trivy/index.html \\
             --skip-dirs bin,obj,packages \\
             --timeout 10m \\
             . || true
@@ -1312,6 +1323,17 @@ def publishSecurityResults() {
                           name: 'Trivy Results',
                        qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
         }
+
+        // Publish HTML report for Trivy
+        publishHTML([
+            reportDir: "${SECURITY_REPORTS_DIR}/trivy",
+            reportFiles: "index.html",
+            reportName: "🛡️ Trivy HTML Report",
+            keepAll: true,
+            alwaysLinkToLastBuild: true,
+            allowMissing: false
+        ])
+
         
         // // Publish standalone HTML report with enhanced configuration
         // if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html")) {
