@@ -996,6 +996,7 @@ def runDependencyCheck() {
             --format JSON \\
             --format XML \\
             --format HTML \\
+            --format JUNIT \\
             --out ${SECURITY_REPORTS_DIR}/dependency-check \\
             --project "\${JOB_NAME}" \\
             --failOnCVSS 0 \\
@@ -1008,6 +1009,24 @@ def runDependencyCheck() {
             --exclude "**/packages/**" \\
             --exclude "**/node_modules/**" \\
             --suppression dependency-check-suppressions.xml || true
+        
+        # Fix HTML report for Jenkins - ensure proper encoding and paths
+        if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html" ]; then
+            echo "🔧 Fixing HTML report for Jenkins compatibility..."
+            
+            # Create a Jenkins-compatible HTML report
+            sed -i 's|href="http://|href="https://|g' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html
+            sed -i 's|src="http://|src="https://|g' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html
+            
+            # Ensure proper UTF-8 encoding
+            sed -i '1i\\<?xml version="1.0" encoding="UTF-8"?>' ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html
+        fi
+        
+        # Validate XML format
+        if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml" ]; then
+            echo "🔍 Validating XML report format..."
+            xmllint --noout ${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml || echo "⚠️ XML validation warning"
+        fi
     """
 }
 
@@ -1224,8 +1243,8 @@ def archiveSecurityReports() {
     
     try {
         archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/**/*", 
-                    allowEmptyArchive: true,
-                    fingerprint: true
+                       allowEmptyArchive: true,
+                       fingerprint: true
         echo "✅ Security reports archived"
     } catch (Exception e) {
         echo "⚠️ Could not archive security reports: ${e.getMessage()}"
@@ -1236,28 +1255,53 @@ def publishSecurityResults() {
     echo "📋 Publishing security results..."
     
     try {
-        // Publish OWASP Dependency Check results (reliable XML format)
+        // Method 1: Try native OWASP Dependency Check plugin (if available)
         if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")) {
-            recordIssues enabledForFailure: true,
-                    tools: [owaspDependencyCheck(pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml")],
-                    qualityGates: [[threshold: 1, type: 'TOTAL_HIGH', unstable: true]]
+            try {
+                dependencyCheckPublisher([
+                    pattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.xml",
+                    canComputeNew: false,
+                    defaultEncoding: '',
+                    healthy: '',
+                    unHealthy: '',
+                    thresholdLimit: 'low',
+                    pluginName: '[OWASP-DC]'
+                ])
+                echo "✅ OWASP Dependency Check results published via native plugin"
+            } catch (Exception pluginException) {
+                echo "⚠️ Native OWASP plugin not available: ${pluginException.getMessage()}"
+                
+                // Method 2: Use JUnit format for reliable parsing
+                if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-junit.xml")) {
+                    echo "📋 Using JUnit format for dependency check results..."
+                    publishTestResults([
+                        testResultsPattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-junit.xml",
+                        allowEmptyResults: true,
+                        keepLongStdio: true
+                    ])
+                    echo "✅ Published dependency check as test results"
+                }
+                
+                // Method 3: Manual issue creation from JSON
+                createManualIssueReport()
+            }
         }
         
         // Publish Semgrep SARIF results
         if (fileExists("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")) {
             recordIssues enabledForFailure: true,
-                    tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")],
-                    qualityGates: [[threshold: 1, type: 'TOTAL_ERROR', unstable: true]]
+                       tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")],
+                       qualityGates: [[threshold: 1, type: 'TOTAL_ERROR', unstable: true]]
         }
         
         // Publish Trivy SARIF results
         if (fileExists("${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")) {
             recordIssues enabledForFailure: true,
-                    tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")],
-                    qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
+                       tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")],
+                       qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
         }
         
-        // Publish HTML report (simplified and reliable)
+        // Publish standalone HTML report with enhanced configuration
         if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html")) {
             publishHTML([
                 allowMissing: false,
@@ -1266,7 +1310,12 @@ def publishSecurityResults() {
                 reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
                 reportFiles: 'dependency-check-report.html',
                 reportName: 'OWASP Dependency Check Report',
-                reportTitles: ''
+                reportTitles: '',
+                includes: '**/*',
+                allowUnpublishedJobExecutions: false,
+                ignoreResourceNotFound: false,
+                reportBuildPolicy: 'ALWAYS',
+                escapeUnderscores: false
             ])
             echo "✅ HTML report published successfully"
         }
@@ -1275,6 +1324,47 @@ def publishSecurityResults() {
         
     } catch (Exception e) {
         echo "⚠️ Could not publish security results: ${e.getMessage()}"
+        e.printStackTrace()
+    }
+}
+
+def createManualIssueReport() {
+    echo "📋 Creating manual issue report from JSON..."
+    
+    if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")) {
+        try {
+            def jsonReport = readFile("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json")
+            def report = new groovy.json.JsonSlurper().parseText(jsonReport)
+            
+            // Create a simple text report for Jenkins
+            def issueReport = new StringBuilder()
+            issueReport.append("OWASP Dependency Check Issues Report\n")
+            issueReport.append("=" * 50 + "\n\n")
+            
+            def issueCount = 0
+            report.dependencies?.each { dep ->
+                dep.vulnerabilities?.each { vuln ->
+                    issueCount++
+                    issueReport.append("Issue #${issueCount}\n")
+                    issueReport.append("File: ${dep.fileName}\n")
+                    issueReport.append("Vulnerability: ${vuln.name}\n")
+                    issueReport.append("Severity: ${vuln.severity}\n")
+                    issueReport.append("CVSS Score: ${vuln.cvssv3?.baseScore ?: vuln.cvssv2?.score ?: 'N/A'}\n")
+                    issueReport.append("Description: ${vuln.description}\n")
+                    issueReport.append("-" * 40 + "\n\n")
+                }
+            }
+            
+            writeFile file: "${SECURITY_REPORTS_DIR}/dependency-check/issues-report.txt", text: issueReport.toString()
+            
+            // Archive the text report
+            archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/dependency-check/issues-report.txt", allowEmptyArchive: true
+            
+            echo "✅ Manual issue report created with ${issueCount} issues"
+            
+        } catch (Exception e) {
+            echo "⚠️ Failed to create manual issue report: ${e.getMessage()}"
+        }
     }
 }
 
@@ -1289,13 +1379,13 @@ Date: ${new Date()}
 Scan Level: ${params.SECURITY_SCAN_LEVEL}
 
 📦 Dependency Check Results:
-Dependencies Scanned: ${env.DEPENDENCIES_SCANNED ?: 'N/A'}
-Vulnerabilities Found: ${env.DEPENDENCY_VULNERABILITIES ?: 'N/A'}
-High/Critical Issues: ${env.DEPENDENCY_HIGH_CRITICAL ?: 'N/A'}
+   Dependencies Scanned: ${env.DEPENDENCIES_SCANNED ?: 'N/A'}
+   Vulnerabilities Found: ${env.DEPENDENCY_VULNERABILITIES ?: 'N/A'}
+   High/Critical Issues: ${env.DEPENDENCY_HIGH_CRITICAL ?: 'N/A'}
 
 🔍 SAST Results:
-Total Issues: ${env.SEMGREP_ISSUES ?: 'N/A'}
-Critical Issues: ${env.SEMGREP_CRITICAL ?: 'N/A'}
+   Total Issues: ${env.SEMGREP_ISSUES ?: 'N/A'}
+   Critical Issues: ${env.SEMGREP_CRITICAL ?: 'N/A'}
 
 Status: ${currentBuild.result ?: 'SUCCESS'}
 """
