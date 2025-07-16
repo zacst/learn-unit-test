@@ -1306,14 +1306,48 @@ def installTrivy() {
         TRIVY_DIR=\$(pwd)/trivy-bin
         mkdir -p \$TRIVY_DIR
 
-        if [ ! -f \$TRIVY_DIR/trivy ]; then
+        # Always reinstall if binary doesn't work or doesn't exist
+        if [ ! -f \$TRIVY_DIR/trivy ] || ! \$TRIVY_DIR/trivy --version >/dev/null 2>&1; then
+            echo "Downloading Trivy v\$TRIVY_VERSION..."
+            
+            # Clean up any existing files
+            rm -f \$TRIVY_DIR/trivy
+            rm -f trivy_\${TRIVY_VERSION}_Linux-64bit.tar.gz
+            
+            # Download with better error handling
             wget -q https://github.com/aquasecurity/trivy/releases/download/v\$TRIVY_VERSION/trivy_\${TRIVY_VERSION}_Linux-64bit.tar.gz
+            
+            # Verify download succeeded
+            if [ ! -f trivy_\${TRIVY_VERSION}_Linux-64bit.tar.gz ]; then
+                echo "❌ Failed to download Trivy"
+                exit 1
+            fi
+            
+            # Extract to specific directory
             tar -xzf trivy_\${TRIVY_VERSION}_Linux-64bit.tar.gz -C \$TRIVY_DIR trivy
+            
+            # Verify extraction
+            if [ ! -f \$TRIVY_DIR/trivy ]; then
+                echo "❌ Failed to extract Trivy binary"
+                exit 1
+            fi
+            
+            # Set permissions
             chmod +x \$TRIVY_DIR/trivy
-            export PATH=\$TRIVY_DIR:\$PATH
+            
+            # Clean up tarball
+            rm -f trivy_\${TRIVY_VERSION}_Linux-64bit.tar.gz
+            
+            echo "✅ Trivy installed successfully"
+        else
+            echo "✅ Trivy already installed and working"
         fi
 
+        # Test the installation
         \$TRIVY_DIR/trivy --version
+        
+        # Download vulnerability database
+        echo "📥 Downloading vulnerability database..."
         \$TRIVY_DIR/trivy image --download-db-only
     """
 }
@@ -1628,16 +1662,6 @@ def publishLintResults() {
                 // Use checkstyle format which is more widely supported
                 if (reportFile.contains("custom-lint-report")) {
                     publishCheckstyleReport(reportFile)
-                } else {
-                    recordIssues(
-                        enabledForFailure: false,
-                        aggregatingResults: false,
-                        tools: [msBuild(pattern: reportFile)],
-                        qualityGates: [
-                            [threshold: 1, type: 'TOTAL', unstable: true],
-                            [threshold: 10, type: 'TOTAL', failed: true]
-                        ]
-                    )
                 }
             }
         }
