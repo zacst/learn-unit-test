@@ -728,17 +728,6 @@ pipeline {
                 }
             }
         }
-    
-        post {
-            always {
-                script {
-                    archiveSecurityReports()
-                    publishSecurityResults()
-                    generateSecuritySummary()
-                    evaluateSecurityGates()
-                }
-            }
-        }
 
         stage('Quality Gate') {
             steps {
@@ -1068,6 +1057,10 @@ pipeline {
     post {
         always {
             script {
+                archiveSecurityReports()
+                publishSecurityResults()
+                generateSecuritySummary()
+                evaluateSecurityGates()
                 echo "🧹 Post-build cleanup..."
                 node {
                     sh """
