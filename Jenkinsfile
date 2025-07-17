@@ -1947,8 +1947,6 @@ apiKey: ${FOSSA_API_KEY}
 
 project:
   name: "${env.JOB_NAME}"
-  team: "${params.FOSSA_TEAM ?: 'default'}"
-  policy: "${params.FOSSA_POLICY ?: 'default'}"
 
 targets:
   auto:
