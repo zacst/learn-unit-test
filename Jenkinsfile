@@ -1986,9 +1986,9 @@ def runFossaAnalysis() {
         # Run analysis with detailed output
         fossa analyze \\
             --config .fossa.yml \\
-            --output ${SECURITY_REPORTS_DIR}/fossa/analysis.json \\
             --debug \\
-            ${params.FOSSA_ANALYZE_ARGS ?: ''}
+            ${params.FOSSA_ANALYZE_ARGS ?: ''} \\
+            2>&1 | tee ${SECURITY_REPORTS_DIR}/fossa/analysis.log
             
         echo "✅ FOSSA analysis completed"
     """
