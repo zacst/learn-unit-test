@@ -1793,6 +1793,7 @@ def runFossaLicenseCheck() {
     }
 }
 
+
 def installFossaCli() {
     echo "🔧 Installing FOSSA CLI..."
     
@@ -1929,6 +1930,11 @@ def installFossaCli() {
 def configureFossa() {
     echo "⚙️ Configuring FOSSA..."
     
+    // Validate API key is set
+    if (!env.FOSSA_API_KEY) {
+        error("❌ FOSSA_API_KEY environment variable is required. Please set it in Jenkins credentials.")
+    }
+    
     // Create FOSSA config file
     writeFile file: '.fossa.yml', text: """
 version: 3
@@ -1962,17 +1968,17 @@ experimental:
   npm:
     production-only: ${params.FOSSA_NPM_PRODUCTION_ONLY ?: 'false'}
 """
-
-    // Validate API key is set
-    if (!env.FOSSA_API_KEY) {
-        error("❌ FOSSA_API_KEY environment variable is required. Please set it in Jenkins credentials.")
-    }
     
     echo "✅ FOSSA configuration created"
 }
 
 def runFossaAnalysis() {
     echo "🔍 Running FOSSA dependency analysis..."
+    
+    // Ensure SECURITY_REPORTS_DIR is defined
+    if (!env.SECURITY_REPORTS_DIR) {
+        env.SECURITY_REPORTS_DIR = "${env.WORKSPACE}/security-reports"
+    }
     
     sh """
         mkdir -p ${SECURITY_REPORTS_DIR}/fossa/
@@ -1991,41 +1997,52 @@ def runFossaAnalysis() {
 def runFossaTest() {
     echo "🧪 Running FOSSA license and vulnerability tests..."
     
-    sh """
-        # Test for license violations and vulnerabilities
-        # This will exit with non-zero code if issues are found
-        fossa test \\
-            --config .fossa.yml \\
-            --timeout ${params.FOSSA_TEST_TIMEOUT ?: '600'} \\
-            --output ${SECURITY_REPORTS_DIR}/fossa/test-results.json \\
-            --debug \\
-            ${params.FOSSA_TEST_ARGS ?: ''}
-            
-        echo "✅ FOSSA tests passed - no license violations found"
-    """
+    try {
+        sh """
+            # Test for license violations and vulnerabilities
+            # This will exit with non-zero code if issues are found
+            fossa test \\
+                --config .fossa.yml \\
+                --timeout ${params.FOSSA_TEST_TIMEOUT ?: '600'} \\
+                --output ${SECURITY_REPORTS_DIR}/fossa/test-results.json \\
+                --debug \\
+                ${params.FOSSA_TEST_ARGS ?: ''}
+                
+            echo "✅ FOSSA tests passed - no license violations found"
+        """
+    } catch (Exception e) {
+        echo "⚠️ FOSSA test found issues: ${e.getMessage()}"
+        // Continue execution to process results
+        currentBuild.result = 'UNSTABLE'
+    }
 }
 
 def generateAttributionReport() {
     echo "📋 Generating attribution report..."
     
-    sh """
-        # Generate attribution report (requires API key)
-        fossa report attribution \\
-            --config .fossa.yml \\
-            --format json \\
-            --output ${SECURITY_REPORTS_DIR}/fossa/attribution.json \\
-            ${params.FOSSA_REPORT_ARGS ?: ''}
-            
-        # Also generate HTML report if requested
-        if [ "${params.GENERATE_HTML_REPORT ?: 'false'}" = "true" ]; then
+    try {
+        sh """
+            # Generate attribution report (requires API key)
             fossa report attribution \\
                 --config .fossa.yml \\
-                --format html \\
-                --output ${SECURITY_REPORTS_DIR}/fossa/attribution.html
-        fi
-        
-        echo "✅ Attribution report generated"
-    """
+                --format json \\
+                --output ${SECURITY_REPORTS_DIR}/fossa/attribution.json \\
+                ${params.FOSSA_REPORT_ARGS ?: ''}
+                
+            # Also generate HTML report if requested
+            if [ "${params.GENERATE_HTML_REPORT ?: 'false'}" = "true" ]; then
+                fossa report attribution \\
+                    --config .fossa.yml \\
+                    --format html \\
+                    --output ${SECURITY_REPORTS_DIR}/fossa/attribution.html
+            fi
+            
+            echo "✅ Attribution report generated"
+        """
+    } catch (Exception e) {
+        echo "⚠️ Could not generate attribution report: ${e.getMessage()}"
+        // Continue execution as this is not critical
+    }
 }
 
 def publishFossaResults() {
@@ -2049,26 +2066,55 @@ def publishFossaTestResults() {
     def testResultsFile = "${SECURITY_REPORTS_DIR}/fossa/test-results.json"
     
     if (fileExists(testResultsFile)) {
-        def testResults = readJSON file: testResultsFile
-        
-        // Create summary for build description
-        def summary = """
-        FOSSA Scan Results:
-        - License Issues: ${testResults.issues?.license?.size() ?: 0}
-        - Vulnerability Issues: ${testResults.issues?.vulnerability?.size() ?: 0}
-        - Total Dependencies: ${testResults.dependencies?.size() ?: 0}
-        """
-        
-        // Add to build description
-        currentBuild.description = (currentBuild.description ?: '') + "\n" + summary
-        
-        echo "📊 FOSSA Results Summary:\n${summary}"
+        try {
+            def testResults = readJSON file: testResultsFile
+            
+            // Create summary for build description
+            def licenseIssues = testResults.issues?.license?.size() ?: 0
+            def vulnerabilityIssues = testResults.issues?.vulnerability?.size() ?: 0
+            def totalDependencies = testResults.dependencies?.size() ?: 0
+            
+            def summary = """
+FOSSA Scan Results:
+- License Issues: ${licenseIssues}
+- Vulnerability Issues: ${vulnerabilityIssues}
+- Total Dependencies: ${totalDependencies}
+"""
+            
+            // Add to build description
+            currentBuild.description = (currentBuild.description ?: '') + "\n" + summary
+            
+            echo "📊 FOSSA Results Summary:\n${summary}"
+            
+            // Set build result based on issues found
+            if (licenseIssues > 0 || vulnerabilityIssues > 0) {
+                currentBuild.result = 'UNSTABLE'
+            }
+            
+        } catch (Exception e) {
+            echo "⚠️ Error processing FOSSA test results: ${e.getMessage()}"
+        }
     }
 }
 
 def generateFossaWarnings() {
     echo "⚠️ Generating FOSSA warnings for Jenkins..."
     
+    // Check if Python is available, fallback to shell if not
+    def pythonAvailable = sh(
+        script: "which python3 || echo 'not-found'",
+        returnStdout: true
+    ).trim()
+    
+    if (pythonAvailable == 'not-found') {
+        // Use shell-based approach if Python is not available
+        generateFossaWarningsShell()
+    } else {
+        generateFossaWarningsPython()
+    }
+}
+
+def generateFossaWarningsPython() {
     sh """
         python3 -c "
 import json
@@ -2105,9 +2151,15 @@ if os.path.exists(test_results_file):
                 warnings_text += f'WARNING: Vulnerability {vuln_id} ({severity}) found in {dep_name}\\n'
                 warnings_count += 1
                 
-        except json.JSONDecodeError:
-            warnings_text += 'ERROR: Could not parse FOSSA test results\\n'
+        except json.JSONDecodeError as e:
+            warnings_text += f'ERROR: Could not parse FOSSA test results: {e}\\n'
             warnings_count += 1
+        except Exception as e:
+            warnings_text += f'ERROR: Error processing FOSSA results: {e}\\n'
+            warnings_count += 1
+
+# Create warnings directory if it doesn't exist
+os.makedirs('${SECURITY_REPORTS_DIR}', exist_ok=True)
 
 # Write warnings file
 with open('${SECURITY_REPORTS_DIR}/fossa-warnings.txt', 'w') as f:
@@ -2117,24 +2169,70 @@ print(f'Generated {warnings_count} warnings')
 "
     """
     
+    publishWarnings()
+}
+
+def generateFossaWarningsShell() {
+    sh """
+        # Shell-based warning generation as fallback
+        WARNINGS_FILE="${SECURITY_REPORTS_DIR}/fossa-warnings.txt"
+        TEST_RESULTS_FILE="${SECURITY_REPORTS_DIR}/fossa/test-results.json"
+        
+        mkdir -p ${SECURITY_REPORTS_DIR}
+        
+        # Clear warnings file
+        > "\$WARNINGS_FILE"
+        
+        if [ -f "\$TEST_RESULTS_FILE" ]; then
+            echo "Processing FOSSA test results..."
+            
+            # Simple grep-based extraction (basic fallback)
+            if grep -q '"license"' "\$TEST_RESULTS_FILE"; then
+                echo "WARNING: License issues found in FOSSA scan" >> "\$WARNINGS_FILE"
+            fi
+            
+            if grep -q '"vulnerability"' "\$TEST_RESULTS_FILE"; then
+                echo "WARNING: Vulnerability issues found in FOSSA scan" >> "\$WARNINGS_FILE"
+            fi
+            
+            # Count issues
+            LICENSE_COUNT=\$(grep -c '"license"' "\$TEST_RESULTS_FILE" || echo 0)
+            VULN_COUNT=\$(grep -c '"vulnerability"' "\$TEST_RESULTS_FILE" || echo 0)
+            
+            echo "Generated warnings for \$LICENSE_COUNT license issues and \$VULN_COUNT vulnerability issues"
+        else
+            echo "No FOSSA test results found"
+        fi
+    """
+    
+    publishWarnings()
+}
+
+def publishWarnings() {
     // Publish warnings if any exist
     if (fileExists("${SECURITY_REPORTS_DIR}/fossa-warnings.txt")) {
         def warningsContent = readFile("${SECURITY_REPORTS_DIR}/fossa-warnings.txt")
         
         if (warningsContent.trim()) {
-            recordIssues(
-                enabledForFailure: false,
-                aggregatingResults: false,
-                tools: [
-                    issues(
-                        pattern: "${SECURITY_REPORTS_DIR}/fossa-warnings.txt",
-                        name: 'FOSSA Issues'
-                    )
-                ],
-                qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]],
-                name: 'FOSSA License & Vulnerability Issues',
-                id: 'fossa-scan'
-            )
+            try {
+                recordIssues(
+                    enabledForFailure: false,
+                    aggregatingResults: false,
+                    tools: [
+                        issues(
+                            pattern: "${SECURITY_REPORTS_DIR}/fossa-warnings.txt",
+                            name: 'FOSSA Issues'
+                        )
+                    ],
+                    qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]],
+                    name: 'FOSSA License & Vulnerability Issues',
+                    id: 'fossa-scan'
+                )
+            } catch (Exception e) {
+                echo "⚠️ Could not publish warnings to Jenkins: ${e.getMessage()}"
+                echo "Warnings content:"
+                echo warningsContent
+            }
         }
     }
 }
