@@ -780,220 +780,220 @@ pipeline {
             }
         }
 
-        stage('Upload to JFrog Artifactory') {
-            steps {
-                script {
-                    echo "📦 Uploading .NET artifacts to JFrog Artifactory..."
+        // stage('Upload to JFrog Artifactory') {
+        //     steps {
+        //         script {
+        //             echo "📦 Uploading .NET artifacts to JFrog Artifactory..."
                     
-                    try {
-                        // Test connection to Artifactory
-                        jf 'rt ping'
-                        echo "✅ JFrog Artifactory connection successful"
+        //             try {
+        //                 // Test connection to Artifactory
+        //                 jf 'rt ping'
+        //                 echo "✅ JFrog Artifactory connection successful"
                         
-                        // Debug: Show current directory and file structure
-                        echo "🔍 Current directory structure:"
-                        sh """
-                            echo "Working directory: \$(pwd)"
-                            echo "Contents of current directory:"
-                            ls -la
-                            echo "Looking for bin directories:"
-                            find . -type d -name 'bin' | head -10
-                            echo "Looking for .NET files in bin directories:"
-                            find . -type f -name '*.dll' -o -name '*.exe' | head -10
-                        """
+        //                 // Debug: Show current directory and file structure
+        //                 echo "🔍 Current directory structure:"
+        //                 sh """
+        //                     echo "Working directory: \$(pwd)"
+        //                     echo "Contents of current directory:"
+        //                     ls -la
+        //                     echo "Looking for bin directories:"
+        //                     find . -type d -name 'bin' | head -10
+        //                     echo "Looking for .NET files in bin directories:"
+        //                     find . -type f -name '*.dll' -o -name '*.exe' | head -10
+        //                 """
                         
-                        // Find and list all potential artifacts with existence check
-                        def artifactsList = sh(
-                            script: """
-                                find . -type f \\( -name '*.dll' -o -name '*.exe' -o -name '*.pdb' \\) \\
-                                    \\( -path '*/bin/Release/*' -o -path '*/bin/Debug/*' \\) | sort
-                            """,
-                            returnStdout: true
-                        ).trim()
+        //                 // Find and list all potential artifacts with existence check
+        //                 def artifactsList = sh(
+        //                     script: """
+        //                         find . -type f \\( -name '*.dll' -o -name '*.exe' -o -name '*.pdb' \\) \\
+        //                             \\( -path '*/bin/Release/*' -o -path '*/bin/Debug/*' \\) | sort
+        //                     """,
+        //                     returnStdout: true
+        //                 ).trim()
                         
-                        echo "🔍 Searching for .NET artifacts completed"
+        //                 echo "🔍 Searching for .NET artifacts completed"
                         
-                        if (artifactsList) {
-                            echo "📋 Found potential artifacts:"
-                            echo "${artifactsList}"
+        //                 if (artifactsList) {
+        //                     echo "📋 Found potential artifacts:"
+        //                     echo "${artifactsList}"
                             
-                            def artifactFiles = artifactsList.split('\n').findAll { 
-                                it.trim() && !it.trim().isEmpty() && !it.contains('🔍') && !it.contains('Searching')
-                            }
+        //                     def artifactFiles = artifactsList.split('\n').findAll { 
+        //                         it.trim() && !it.trim().isEmpty() && !it.contains('🔍') && !it.contains('Searching')
+        //                     }
                             
-                            if (artifactFiles.size() > 0) {
-                                echo "📦 Processing ${artifactFiles.size()} artifact(s)..."
+        //                     if (artifactFiles.size() > 0) {
+        //                         echo "📦 Processing ${artifactFiles.size()} artifact(s)..."
                                 
-                                // Get current working directory for absolute paths
-                                def workingDir = sh(script: "pwd", returnStdout: true).trim()
-                                echo "📁 Working directory: ${workingDir}"
+        //                         // Get current working directory for absolute paths
+        //                         def workingDir = sh(script: "pwd", returnStdout: true).trim()
+        //                         echo "📁 Working directory: ${workingDir}"
                                 
-                                // Process each artifact file with existence verification
-                                artifactFiles.each { artifactPath ->
-                                    artifactPath = artifactPath.trim()
+        //                         // Process each artifact file with existence verification
+        //                         artifactFiles.each { artifactPath ->
+        //                             artifactPath = artifactPath.trim()
                                     
-                                    // Verify file exists before attempting upload
-                                    def fileExists = sh(
-                                        script: "test -f '${artifactPath}' && echo 'true' || echo 'false'",
-                                        returnStdout: true
-                                    ).trim()
+        //                             // Verify file exists before attempting upload
+        //                             def fileExists = sh(
+        //                                 script: "test -f '${artifactPath}' && echo 'true' || echo 'false'",
+        //                                 returnStdout: true
+        //                             ).trim()
                                     
-                                    if (fileExists == 'true') {
-                                        // Get relative path for target structure
-                                        def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
+        //                             if (fileExists == 'true') {
+        //                                 // Get relative path for target structure
+        //                                 def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
                                         
-                                        echo "📤 Processing file: ${relativePath}"
+        //                                 echo "📤 Processing file: ${relativePath}"
                                         
-                                        try {
-                                            // FIXED: Use proper jf rt u command syntax
-                                            jf "rt u \"${artifactPath}\" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
+        //                                 try {
+        //                                     // FIXED: Use proper jf rt u command syntax
+        //                                     jf "rt u \"${artifactPath}\" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
                                             
-                                            echo "✅ Successfully uploaded: ${relativePath}"
+        //                                     echo "✅ Successfully uploaded: ${relativePath}"
                                             
-                                        } catch (Exception uploadException) {
-                                            echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
+        //                                 } catch (Exception uploadException) {
+        //                                     echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
                                             
-                                            // Alternative approach: Upload with simpler syntax
-                                            try {
-                                                echo "🔄 Trying simplified upload..."
+        //                                     // Alternative approach: Upload with simpler syntax
+        //                                     try {
+        //                                         echo "🔄 Trying simplified upload..."
                                                 
-                                                // Create a temporary spec file for upload
-                                                def specContent = """
-                                                {
-                                                    "files": [
-                                                        {
-                                                            "pattern": "${artifactPath}",
-                                                            "target": "${ARTIFACTORY_REPO_BINARIES}/${relativePath}"
-                                                        }
-                                                    ]
-                                                }
-                                                """
+        //                                         // Create a temporary spec file for upload
+        //                                         def specContent = """
+        //                                         {
+        //                                             "files": [
+        //                                                 {
+        //                                                     "pattern": "${artifactPath}",
+        //                                                     "target": "${ARTIFACTORY_REPO_BINARIES}/${relativePath}"
+        //                                                 }
+        //                                             ]
+        //                                         }
+        //                                         """
                                                 
-                                                writeFile file: 'upload-spec.json', text: specContent
+        //                                         writeFile file: 'upload-spec.json', text: specContent
                                                 
-                                                jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
+        //                                         jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
                                                 
-                                                echo "✅ Successfully uploaded with spec file: ${relativePath}"
+        //                                         echo "✅ Successfully uploaded with spec file: ${relativePath}"
                                                 
-                                            } catch (Exception specException) {
-                                                echo "❌ Spec file approach also failed: ${specException.getMessage()}"
+        //                                     } catch (Exception specException) {
+        //                                         echo "❌ Spec file approach also failed: ${specException.getMessage()}"
                                                 
-                                                // Final fallback: Direct upload without build info
-                                                try {
-                                                    echo "🔄 Trying direct upload..."
+        //                                         // Final fallback: Direct upload without build info
+        //                                         try {
+        //                                             echo "🔄 Trying direct upload..."
                                                     
-                                                    jf "rt u \"${artifactPath}\" ${ARTIFACTORY_REPO_BINARIES}/${relativePath}"
+        //                                             jf "rt u \"${artifactPath}\" ${ARTIFACTORY_REPO_BINARIES}/${relativePath}"
                                                     
-                                                    echo "✅ Successfully uploaded (direct): ${relativePath}"
+        //                                             echo "✅ Successfully uploaded (direct): ${relativePath}"
                                                     
-                                                } catch (Exception directException) {
-                                                    echo "❌ All upload approaches failed for: ${relativePath}"
-                                                    echo "Error: ${directException.getMessage()}"
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        echo "⚠️ File does not exist, skipping: ${artifactPath}"
-                                    }
-                                }
+        //                                         } catch (Exception directException) {
+        //                                             echo "❌ All upload approaches failed for: ${relativePath}"
+        //                                             echo "Error: ${directException.getMessage()}"
+        //                                         }
+        //                                     }
+        //                                 }
+        //                             } else {
+        //                                 echo "⚠️ File does not exist, skipping: ${artifactPath}"
+        //                             }
+        //                         }
                                 
-                                // Upload NuGet packages if they exist
-                                def nugetPackages = sh(
-                                    script: "find . -name '*.nupkg' -o -name '*.snupkg' | head -20",
-                                    returnStdout: true
-                                ).trim()
+        //                         // Upload NuGet packages if they exist
+        //                         def nugetPackages = sh(
+        //                             script: "find . -name '*.nupkg' -o -name '*.snupkg' | head -20",
+        //                             returnStdout: true
+        //                         ).trim()
                                 
-                                if (nugetPackages) {
-                                    echo "📦 Found NuGet packages, uploading..."
-                                    nugetPackages.split('\n').findAll { it.trim() }.each { packagePath ->
-                                        def packageExists = sh(
-                                            script: "test -f '${packagePath}' && echo 'true' || echo 'false'",
-                                            returnStdout: true
-                                        ).trim()
+        //                         if (nugetPackages) {
+        //                             echo "📦 Found NuGet packages, uploading..."
+        //                             nugetPackages.split('\n').findAll { it.trim() }.each { packagePath ->
+        //                                 def packageExists = sh(
+        //                                     script: "test -f '${packagePath}' && echo 'true' || echo 'false'",
+        //                                     returnStdout: true
+        //                                 ).trim()
                                         
-                                        if (packageExists == 'true') {
-                                            echo "📤 Uploading NuGet package: ${packagePath}"
+        //                                 if (packageExists == 'true') {
+        //                                     echo "📤 Uploading NuGet package: ${packagePath}"
                                             
-                                            try {
-                                                jf "rt u \"${packagePath}\" ${ARTIFACTORY_REPO_NUGET}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=true"
-                                                echo "✅ Successfully uploaded NuGet package: ${packagePath}"
-                                            } catch (Exception nugetException) {
-                                                echo "❌ Failed to upload NuGet package ${packagePath}: ${nugetException.getMessage()}"
-                                            }
-                                        }
-                                    }
-                                }
+        //                                     try {
+        //                                         jf "rt u \"${packagePath}\" ${ARTIFACTORY_REPO_NUGET}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=true"
+        //                                         echo "✅ Successfully uploaded NuGet package: ${packagePath}"
+        //                                     } catch (Exception nugetException) {
+        //                                         echo "❌ Failed to upload NuGet package ${packagePath}: ${nugetException.getMessage()}"
+        //                                     }
+        //                                 }
+        //                             }
+        //                         }
                                 
-                                // Upload test results and coverage reports
-                                def testResultsPath = "${workingDir}/${TEST_RESULTS_DIR}"
-                                def testResultsExists = sh(
-                                    script: "test -d '${testResultsPath}' && echo 'true' || echo 'false'",
-                                    returnStdout: true
-                                ).trim()
+        //                         // Upload test results and coverage reports
+        //                         def testResultsPath = "${workingDir}/${TEST_RESULTS_DIR}"
+        //                         def testResultsExists = sh(
+        //                             script: "test -d '${testResultsPath}' && echo 'true' || echo 'false'",
+        //                             returnStdout: true
+        //                         ).trim()
                                 
-                                if (testResultsExists == 'true') {
-                                    echo "📊 Uploading test results..."
-                                    try {
-                                        jf "rt u \"${testResultsPath}/*\" ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
-                                        echo "✅ Test results uploaded successfully"
-                                    } catch (Exception testException) {
-                                        echo "❌ Failed to upload test results: ${testException.getMessage()}"
-                                    }
-                                }
+        //                         if (testResultsExists == 'true') {
+        //                             echo "📊 Uploading test results..."
+        //                             try {
+        //                                 jf "rt u \"${testResultsPath}/*\" ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
+        //                                 echo "✅ Test results uploaded successfully"
+        //                             } catch (Exception testException) {
+        //                                 echo "❌ Failed to upload test results: ${testException.getMessage()}"
+        //                             }
+        //                         }
                                 
-                                def coveragePath = "${workingDir}/${COVERAGE_REPORTS_DIR}"
-                                def coverageExists = sh(
-                                    script: "test -d '${coveragePath}' && echo 'true' || echo 'false'",
-                                    returnStdout: true
-                                ).trim()
+        //                         def coveragePath = "${workingDir}/${COVERAGE_REPORTS_DIR}"
+        //                         def coverageExists = sh(
+        //                             script: "test -d '${coveragePath}' && echo 'true' || echo 'false'",
+        //                             returnStdout: true
+        //                         ).trim()
                                 
-                                if (coverageExists == 'true') {
-                                    echo "📊 Uploading coverage reports..."
-                                    try {
-                                        jf "rt u \"${coveragePath}/**\" ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
-                                        echo "✅ Coverage reports uploaded successfully"
-                                    } catch (Exception coverageException) {
-                                        echo "❌ Failed to upload coverage reports: ${coverageException.getMessage()}"
-                                    }
-                                }
+        //                         if (coverageExists == 'true') {
+        //                             echo "📊 Uploading coverage reports..."
+        //                             try {
+        //                                 jf "rt u \"${coveragePath}/**\" ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
+        //                                 echo "✅ Coverage reports uploaded successfully"
+        //                             } catch (Exception coverageException) {
+        //                                 echo "❌ Failed to upload coverage reports: ${coverageException.getMessage()}"
+        //                             }
+        //                         }
                                 
-                                // Publish build info
-                                try {
-                                    jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
-                                    echo "✅ Build info published successfully"
-                                } catch (Exception buildInfoException) {
-                                    echo "❌ Failed to publish build info: ${buildInfoException.getMessage()}"
-                                }
+        //                         // Publish build info
+        //                         try {
+        //                             jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
+        //                             echo "✅ Build info published successfully"
+        //                         } catch (Exception buildInfoException) {
+        //                             echo "❌ Failed to publish build info: ${buildInfoException.getMessage()}"
+        //                         }
                                 
-                            } else {
-                                echo "⚠️ No artifacts found to upload"
-                            }
-                        } else {
-                            echo "⚠️ No .NET artifacts found in bin/Release or bin/Debug directories"
-                            echo "🔍 Checking alternative locations..."
+        //                     } else {
+        //                         echo "⚠️ No artifacts found to upload"
+        //                     }
+        //                 } else {
+        //                     echo "⚠️ No .NET artifacts found in bin/Release or bin/Debug directories"
+        //                     echo "🔍 Checking alternative locations..."
                             
-                            // Check for artifacts in other common locations
-                            def alternativeArtifacts = sh(
-                                script: "find . -name '*.dll' -o -name '*.exe' | grep -v '/obj/' | head -10",
-                                returnStdout: true
-                            ).trim()
+        //                     // Check for artifacts in other common locations
+        //                     def alternativeArtifacts = sh(
+        //                         script: "find . -name '*.dll' -o -name '*.exe' | grep -v '/obj/' | head -10",
+        //                         returnStdout: true
+        //                     ).trim()
                             
-                            if (alternativeArtifacts) {
-                                echo "📋 Found artifacts in alternative locations:"
-                                echo "${alternativeArtifacts}"
-                            } else {
-                                echo "❌ No .NET artifacts found anywhere"
-                            }
-                        }
+        //                     if (alternativeArtifacts) {
+        //                         echo "📋 Found artifacts in alternative locations:"
+        //                         echo "${alternativeArtifacts}"
+        //                     } else {
+        //                         echo "❌ No .NET artifacts found anywhere"
+        //                     }
+        //                 }
                         
-                    } catch (Exception e) {
-                        echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
-                        echo "📊 This is non-critical - marking as unstable"
-                        currentBuild.result = 'UNSTABLE'
-                    }
-                }
-            }
-        }
+        //             } catch (Exception e) {
+        //                 echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
+        //                 echo "📊 This is non-critical - marking as unstable"
+        //                 currentBuild.result = 'UNSTABLE'
+        //             }
+        //         }
+        //     }
+        // }
 
         stage('Deployment') {
             steps {
