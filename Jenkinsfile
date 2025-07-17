@@ -44,7 +44,6 @@ pipeline {
 
         // FOSSA Configuration
         FOSSA_API_KEY = credentials('fossa-api-key')
-        SECURITY_REPORTS_DIR = 'security-reports'
 
         // DAST Configuration
         DAST_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/dast"
