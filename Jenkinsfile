@@ -1779,9 +1779,6 @@ def runFossaLicenseCheck() {
         // Test for license and vulnerability issues
         runFossaTest()
         
-        // Generate attribution report
-        generateAttributionReport()
-        
         echo "✅ FOSSA license compliance check completed successfully."
         
     } catch (Exception e) {
@@ -2000,34 +1997,6 @@ def runFossaTest() {
     
     // This will run regardless of test results
     echo "📊 FOSSA test completed - results saved to test-results.json"
-}
-
-def generateAttributionReport() {
-    echo "📋 Generating attribution report..."
-    
-    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-        sh """
-            # Generate attribution report (requires API key)
-            # Use --json flag instead of --format json --output
-            fossa report attribution \\
-                --config .fossa.yml \\
-                --json \\
-                ${params.FOSSA_REPORT_ARGS ?: ''} \\
-                > ${SECURITY_REPORTS_DIR}/fossa/attribution.json
-                
-            # Also generate text report if requested
-            if [ "${params.GENERATE_HTML_REPORT ?: 'false'}" = "true" ]; then
-                fossa report attribution \\
-                    --config .fossa.yml \\
-                    ${params.FOSSA_REPORT_ARGS ?: ''} \\
-                    > ${SECURITY_REPORTS_DIR}/fossa/attribution.txt
-            fi
-        """
-        echo "✅ Attribution report generated"
-    }
-    
-    // This will run regardless of report generation results
-    echo "📄 Attribution report generation completed"
 }
 
 def publishFossaResults() {
