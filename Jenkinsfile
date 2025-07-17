@@ -1808,64 +1808,114 @@ def installFossaCli() {
             # Create local bin directory
             mkdir -p \${HOME}/bin
             
-            # Download and modify the install-latest script to install locally
-            echo "Downloading FOSSA install script..."
-            curl -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/fossas/fossa-cli/master/install-latest.sh -o /tmp/install-latest.sh
+            # Manual installation without any external scripts
+            echo "Getting latest FOSSA CLI v3 release..."
+            LATEST_RELEASE=\$(curl -s https://api.github.com/repos/fossas/fossa-cli/releases/latest)
+            VERSION=\$(echo "\$LATEST_RELEASE" | grep '"tag_name"' | head -n1 | cut -d'"' -f4)
             
-            # Make the script executable
-            chmod +x /tmp/install-latest.sh
+            if [ -z "\$VERSION" ]; then
+                echo "❌ Could not get latest version from GitHub API"
+                exit 1
+            fi
             
-            # Set environment variables to install locally without sudo
-            export FOSSA_CLI_INSTALL_DIR="\${HOME}/bin"
-            export PATH="\${HOME}/bin:\$PATH"
+            echo "Latest version: \$VERSION"
             
-            # Run the installer with local installation
-            echo "Running FOSSA installer..."
-            bash /tmp/install-latest.sh
+            # Extract all download URLs for this version
+            echo "Available download URLs:"
+            echo "\$LATEST_RELEASE" | grep '"browser_download_url"' | cut -d'"' -f4
             
-            # If the installer still failed, try manual installation
-            if [ ! -f "\${HOME}/bin/fossa" ]; then
-                echo "Installer failed, trying manual installation..."
-                
-                # Get the latest release info
-                LATEST_RELEASE=\$(curl -s https://api.github.com/repos/fossas/fossa-cli/releases/latest)
-                VERSION=\$(echo "\$LATEST_RELEASE" | grep '"tag_name"' | head -n1 | cut -d'"' -f4)
-                
-                # Extract the download URL for Linux AMD64
-                DOWNLOAD_URL=\$(echo "\$LATEST_RELEASE" | grep '"browser_download_url"' | grep 'linux_amd64' | head -n1 | cut -d'"' -f4)
-                
-                if [ -n "\$DOWNLOAD_URL" ]; then
-                    echo "Downloading from: \$DOWNLOAD_URL"
-                    curl -L --fail --silent --show-error "\$DOWNLOAD_URL" -o /tmp/fossa.archive
-                    
-                    # Extract based on file type
-                    if file /tmp/fossa.archive | grep -q "gzip"; then
-                        tar -xzf /tmp/fossa.archive -C /tmp/
-                    elif file /tmp/fossa.archive | grep -q "Zip"; then
-                        unzip -q /tmp/fossa.archive -d /tmp/
-                    fi
-                    
-                    # Find and move the binary
-                    FOSSA_BINARY=\$(find /tmp -name "fossa" -type f -executable 2>/dev/null | head -n1)
-                    if [ -n "\$FOSSA_BINARY" ]; then
-                        cp "\$FOSSA_BINARY" \${HOME}/bin/fossa
-                        chmod +x \${HOME}/bin/fossa
-                    fi
+            # Try to find the Linux AMD64 download URL
+            DOWNLOAD_URL=\$(echo "\$LATEST_RELEASE" | grep '"browser_download_url"' | grep 'linux_amd64' | head -n1 | cut -d'"' -f4)
+            
+            if [ -z "\$DOWNLOAD_URL" ]; then
+                # Try alternative patterns
+                DOWNLOAD_URL=\$(echo "\$LATEST_RELEASE" | grep '"browser_download_url"' | grep -i 'linux' | grep -i 'amd64\\|x86_64' | head -n1 | cut -d'"' -f4)
+            fi
+            
+            if [ -z "\$DOWNLOAD_URL" ]; then
+                echo "❌ Could not find Linux AMD64 download URL"
+                echo "Available assets:"
+                echo "\$LATEST_RELEASE" | grep '"browser_download_url"' | cut -d'"' -f4
+                exit 1
+            fi
+            
+            echo "Downloading from: \$DOWNLOAD_URL"
+            
+            # Download the archive
+            if ! curl -L --fail --silent --show-error "\$DOWNLOAD_URL" -o /tmp/fossa.archive; then
+                echo "❌ Download failed"
+                exit 1
+            fi
+            
+            # Verify download
+            if [ ! -f /tmp/fossa.archive ] || [ ! -s /tmp/fossa.archive ]; then
+                echo "❌ Download failed or file is empty"
+                exit 1
+            fi
+            
+            # Check file type and extract accordingly
+            FILE_TYPE=\$(file /tmp/fossa.archive)
+            echo "File type: \$FILE_TYPE"
+            
+            if echo "\$FILE_TYPE" | grep -q "gzip"; then
+                echo "Extracting tar.gz archive..."
+                tar -xzf /tmp/fossa.archive -C /tmp/
+            elif echo "\$FILE_TYPE" | grep -q "Zip"; then
+                echo "Extracting zip archive..."
+                unzip -q /tmp/fossa.archive -d /tmp/
+            else
+                echo "❌ Unknown file type: \$FILE_TYPE"
+                echo "File contents (first 50 bytes):"
+                head -c 50 /tmp/fossa.archive | hexdump -C
+                exit 1
+            fi
+            
+            # Find the fossa binary (check multiple possible locations)
+            FOSSA_BINARY=""
+            
+            # Look for fossa binary in extracted files
+            for possible_path in \$(find /tmp -name "fossa" -type f 2>/dev/null); do
+                if [ -x "\$possible_path" ]; then
+                    FOSSA_BINARY="\$possible_path"
+                    break
+                fi
+            done
+            
+            # If not found as executable, look for any fossa file and make it executable
+            if [ -z "\$FOSSA_BINARY" ]; then
+                FOSSA_BINARY=\$(find /tmp -name "fossa" -type f 2>/dev/null | head -n1)
+                if [ -n "\$FOSSA_BINARY" ]; then
+                    chmod +x "\$FOSSA_BINARY"
                 fi
             fi
             
-            # Clean up
-            rm -f /tmp/install-latest.sh /tmp/fossa.archive
-            rm -rf /tmp/fossa_* /tmp/fossa-*
-            
-            # Verify installation
-            if [ -f "\${HOME}/bin/fossa" ]; then
-                echo "✅ FOSSA CLI installed successfully"
-                \${HOME}/bin/fossa --version
-            else
-                echo "❌ FOSSA CLI installation failed"
+            if [ -z "\$FOSSA_BINARY" ]; then
+                echo "❌ Could not find fossa binary after extraction"
+                echo "Contents of /tmp after extraction:"
+                ls -la /tmp/
+                echo "Looking for any fossa-related files:"
+                find /tmp -name "*fossa*" -type f 2>/dev/null || echo "No fossa files found"
                 exit 1
             fi
+            
+            echo "Found FOSSA binary at: \$FOSSA_BINARY"
+            
+            # Copy binary to bin directory
+            cp "\$FOSSA_BINARY" \${HOME}/bin/fossa
+            
+            # Make executable
+            chmod +x \${HOME}/bin/fossa
+            
+            # Clean up
+            rm -f /tmp/fossa.archive
+            rm -rf /tmp/fossa_* /tmp/fossa-* /tmp/fossa
+            
+            # Add to PATH for this session
+            export PATH=\${HOME}/bin:\$PATH
+            
+            # Verify installation
+            echo "Verifying FOSSA CLI installation..."
+            \${HOME}/bin/fossa --version
         """
         
         env.PATH = "${env.HOME}/bin:${env.PATH}"
