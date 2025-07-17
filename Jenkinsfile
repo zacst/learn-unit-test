@@ -2163,136 +2163,147 @@ def publishWarnings() {
     }
 }
 
-    def runScanCodeLicenseCheck() {
-        // Install ScanCode using pip
-        sh '''
-            echo "Installing ScanCode..."
-            # Create virtual environment to avoid conflicts
-            python3 -m venv scancode-env
-            source scancode-env/bin/activate
-            
-            # Install ScanCode
-            pip install --upgrade pip
-            pip install scancode-toolkit
-            
-            # Verify installation
-            scancode --version
-        '''
+def runScanCodeLicenseCheck() {
+    // Install ScanCode using pip with --user flag
+    sh '''
+        echo "Installing ScanCode..."
+        # Install ScanCode in user directory
+        pip3 install --user --upgrade pip
+        pip3 install --user scancode-toolkit
         
-        // Run ScanCode license scan
-        sh '''
-            source scancode-env/bin/activate
-            
-            echo "Running ScanCode license scan..."
-            
-            # Run comprehensive license scan
-            scancode --license --copyright --summary --json license-results.json --html license-report.html .
-            
-            # Also generate a simple text summary
-            scancode --license --copyright --summary --output-format jsonlines . | \
-            jq -r 'select(.type == "file" and .licenses) | "\\(.path): \\(.licenses[].short_name // .licenses[].key)"' > license-summary.txt
-            
-            # Generate license compliance report
-            cat > license-compliance.html << 'EOF'
+        # Add user bin to PATH
+        export PATH="$HOME/.local/bin:$PATH"
+        
+        # Verify installation
+        scancode --version
+    '''
+    
+    // Run ScanCode license scan
+    sh '''
+        export PATH="$HOME/.local/bin:$PATH"
+        
+        echo "Running ScanCode license scan..."
+        
+        # Run comprehensive license scan
+        scancode --license --copyright --summary --json license-results.json --html license-report.html .
+        
+        # ... rest of your scanning code
+    '''
+        
+    // Run ScanCode license scan
+    sh '''
+        source scancode-env/bin/activate
+        
+        echo "Running ScanCode license scan..."
+        
+        # Run comprehensive license scan
+        scancode --license --copyright --summary --json license-results.json --html license-report.html .
+        
+        # Also generate a simple text summary
+        scancode --license --copyright --summary --output-format jsonlines . | \
+        jq -r 'select(.type == "file" and .licenses) | "\\(.path): \\(.licenses[].short_name // .licenses[].key)"' > license-summary.txt
+        
+        # Generate license compliance report
+        cat > license-compliance.html << 'EOF'
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ScanCode License Compliance Report</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .header { background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-        .summary { background-color: #e6f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-        .license-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        .license-table th, .license-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        .license-table th { background-color: #f2f2f2; }
-        .risk-high { background-color: #ffe6e6; }
-        .risk-medium { background-color: #fff3e6; }
-        .risk-low { background-color: #e6ffe6; }
-        .timestamp { color: #666; font-size: 0.9em; }
-        pre { background-color: #f5f5f5; padding: 10px; overflow-x: auto; }
-    </style>
+<title>ScanCode License Compliance Report</title>
+<style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .header { background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+    .summary { background-color: #e6f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+    .license-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    .license-table th, .license-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    .license-table th { background-color: #f2f2f2; }
+    .risk-high { background-color: #ffe6e6; }
+    .risk-medium { background-color: #fff3e6; }
+    .risk-low { background-color: #e6ffe6; }
+    .timestamp { color: #666; font-size: 0.9em; }
+    pre { background-color: #f5f5f5; padding: 10px; overflow-x: auto; }
+</style>
 </head>
 <body>
-    <div class="header">
-        <h1>📋 ScanCode License Compliance Report</h1>
-        <p class="timestamp">Generated: $(date)</p>
-    </div>
-    
-    <div class="summary">
-        <h2>📊 Quick Summary</h2>
-        <div id="summary-content">
+<div class="header">
+    <h1>📋 ScanCode License Compliance Report</h1>
+    <p class="timestamp">Generated: $(date)</p>
+</div>
+
+<div class="summary">
+    <h2>📊 Quick Summary</h2>
+    <div id="summary-content">
 EOF
-            
-            # Parse results and add summary
-            if [ -f license-results.json ]; then
-                echo "        <p><strong>Total Files Scanned:</strong> $(jq '.headers[0].summary.file_count' license-results.json)</p>" >> license-compliance.html
-                echo "        <p><strong>Files with Licenses:</strong> $(jq '.headers[0].summary.license_clarity_score.total' license-results.json)</p>" >> license-compliance.html
-                echo "        <p><strong>Unique Licenses Found:</strong> $(jq -r '.license_references | length' license-results.json)</p>" >> license-compliance.html
-            fi
-            
-            cat >> license-compliance.html << 'EOF'
-        </div>
+        
+        # Parse results and add summary
+        if [ -f license-results.json ]; then
+            echo "        <p><strong>Total Files Scanned:</strong> $(jq '.headers[0].summary.file_count' license-results.json)</p>" >> license-compliance.html
+            echo "        <p><strong>Files with Licenses:</strong> $(jq '.headers[0].summary.license_clarity_score.total' license-results.json)</p>" >> license-compliance.html
+            echo "        <p><strong>Unique Licenses Found:</strong> $(jq -r '.license_references | length' license-results.json)</p>" >> license-compliance.html
+        fi
+        
+        cat >> license-compliance.html << 'EOF'
     </div>
-    
-    <div class="summary">
-        <h2>⚖️ License Summary</h2>
-        <pre>
+</div>
+
+<div class="summary">
+    <h2>⚖️ License Summary</h2>
+    <pre>
 EOF
-            
-            # Add license summary
-            if [ -f license-summary.txt ]; then
-                head -20 license-summary.txt >> license-compliance.html
-                if [ $(wc -l < license-summary.txt) -gt 20 ]; then
-                    echo "... (truncated, see full report for complete list)" >> license-compliance.html
-                fi
+        
+        # Add license summary
+        if [ -f license-summary.txt ]; then
+            head -20 license-summary.txt >> license-compliance.html
+            if [ $(wc -l < license-summary.txt) -gt 20 ]; then
+                echo "... (truncated, see full report for complete list)" >> license-compliance.html
             fi
-            
-            cat >> license-compliance.html << 'EOF'
-        </pre>
-    </div>
-    
-    <div class="summary">
-        <h2>📄 Full Report</h2>
-        <p>For the complete detailed report with all findings, <a href="license-report.html">click here to view the full ScanCode HTML report</a></p>
-    </div>
-    
+        fi
+        
+        cat >> license-compliance.html << 'EOF'
+    </pre>
+</div>
+
+<div class="summary">
+    <h2>📄 Full Report</h2>
+    <p>For the complete detailed report with all findings, <a href="license-report.html">click here to view the full ScanCode HTML report</a></p>
+</div>
+
 </body>
 </html>
 EOF
-            
-            # Check for high-risk licenses (customize this list as needed)
-            HIGH_RISK_LICENSES="gpl-2.0 gpl-3.0 agpl-3.0 lgpl-2.1 lgpl-3.0"
-            
-            echo "Checking for high-risk licenses..."
-            for license in $HIGH_RISK_LICENSES; do
-                if grep -q "$license" license-summary.txt; then
-                    echo "WARNING: Found high-risk license: $license"
-                fi
-            done
-        '''
         
-        // Archive the results
-        archiveArtifacts artifacts: 'license-results.json, license-report.html, license-summary.txt, license-compliance.html', fingerprint: true, allowEmptyArchive: true
+        # Check for high-risk licenses (customize this list as needed)
+        HIGH_RISK_LICENSES="gpl-2.0 gpl-3.0 agpl-3.0 lgpl-2.1 lgpl-3.0"
         
-        // Publish HTML report to Jenkins menu
-        publishHTML([
-            allowMissing: false,
-            alwaysLinkToLastBuild: true,
-            keepAll: true,
-            reportDir: '.',
-            reportFiles: 'license-compliance.html',
-            reportName: 'License Compliance Report',
-            reportTitles: 'ScanCode License Compliance'
-        ])
-        
-        // Also publish detailed ScanCode report
-        publishHTML([
-            allowMissing: false,
-            alwaysLinkToLastBuild: true,
-            keepAll: true,
-            reportDir: '.',
-            reportFiles: 'license-report.html',
-            reportName: 'Detailed ScanCode Report',
-            reportTitles: 'Full ScanCode Analysis'
-        ])
-    }
+        echo "Checking for high-risk licenses..."
+        for license in $HIGH_RISK_LICENSES; do
+            if grep -q "$license" license-summary.txt; then
+                echo "WARNING: Found high-risk license: $license"
+            fi
+        done
+    '''
+    
+    // Archive the results
+    archiveArtifacts artifacts: 'license-results.json, license-report.html, license-summary.txt, license-compliance.html', fingerprint: true, allowEmptyArchive: true
+    
+    // Publish HTML report to Jenkins menu
+    publishHTML([
+        allowMissing: false,
+        alwaysLinkToLastBuild: true,
+        keepAll: true,
+        reportDir: '.',
+        reportFiles: 'license-compliance.html',
+        reportName: 'License Compliance Report',
+        reportTitles: 'ScanCode License Compliance'
+    ])
+    
+    // Also publish detailed ScanCode report
+    publishHTML([
+        allowMissing: false,
+        alwaysLinkToLastBuild: true,
+        keepAll: true,
+        reportDir: '.',
+        reportFiles: 'license-report.html',
+        reportName: 'Detailed ScanCode Report',
+        reportTitles: 'Full ScanCode Analysis'
+    ])
+}
