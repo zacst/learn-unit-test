@@ -1943,7 +1943,7 @@ def configureFossa() {
     writeFile file: '.fossa.yml', text: """
 version: 3
 server: https://app.fossa.com
-apiKey: \${FOSSA_API_KEY}
+apiKey: ${FOSSA_API_KEY}
 
 project:
   name: "${env.JOB_NAME}"
