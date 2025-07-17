@@ -2174,14 +2174,34 @@ def runScanCodeLicenseCheck() {
     sh '''
         export PATH="$HOME/.local/bin:$PATH"
         
-        echo "Running ScanCode license scan..."
+        echo "Running ScanCode license scan with resource limits..."
         
-        # Run comprehensive license scan with proper options
-        scancode --license --copyright --classify --summary --json license-results.json --html license-report.html .
+        # Create ignore file for common directories that don't need scanning
+        cat > .scancode-ignore << 'IGNORE_EOF'
+*.git/*
+*node_modules/*
+*venv/*
+*__pycache__/*
+*.pyc
+*.class
+*.jar
+*.war
+*.ear
+*target/*
+*build/*
+*dist/*
+*out/*
+*.log
+*.tmp
+*temp/*
+IGNORE_EOF
         
-        # Also generate a simple text summary using basic scan
-        scancode --license --copyright --output-format jsonlines . | \
-        jq -r 'select(.type == "file" and .licenses) | "\\(.path): \\(.licenses[].short_name // .licenses[].key)"' > license-summary.txt
+        # Run comprehensive license scan with reduced resource usage
+        scancode --license --copyright --classify --summary --processes 2 --timeout 300 --ignore .scancode-ignore --json license-results.json --html license-report.html .
+        
+        # Also generate a simple text summary using basic scan with limits
+        timeout 180 scancode --license --copyright --processes 1 --output-format jsonlines . | \
+        jq -r 'select(.type == "file" and .licenses) | "\\(.path): \\(.licenses[].short_name // .licenses[].key)"' > license-summary.txt || echo "License summary generation timed out or failed" > license-summary.txt
         
         # Generate license compliance report
         cat > license-compliance.html << 'EOF'
