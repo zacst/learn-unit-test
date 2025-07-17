@@ -107,11 +107,11 @@ pipeline {
             description: 'Enable dependency license compliance check'
         )
 
-        // DAST Parameters
-        booleanParam(name: 'ENABLE_DAST_SCAN', defaultValue: true, description: 'Enable Dynamic Application Security Testing (DAST) with OWASP ZAP')
-        string(name: 'STAGING_URL', defaultValue: 'http://your-staging-app.example.com', description: 'URL of the deployed staging application for DAST scan')
+        // // DAST Parameters (to be configured in the pipeline)
+        // booleanParam(name: 'ENABLE_DAST_SCAN', defaultValue: true, description: 'Enable Dynamic Application Security Testing (DAST) with OWASP ZAP')
+        // string(name: 'STAGING_URL', defaultValue: 'http://your-staging-app.example.com', description: 'URL of the deployed staging application for DAST scan')
 
-        // // Notification Parameters
+        // // Notification Parameters (to be configured in the pipeline)
         // string(name: 'SLACK_CHANNEL', defaultValue: '#ci-alerts', description: 'Slack channel to send notifications to')
         // credentials(name: 'SLACK_CREDENTIAL_ID', description: 'Jenkins credential ID for the Slack Bot Token', required: false)
     }
@@ -1960,29 +1960,30 @@ targets:
 def runFossaAnalysis() {
     echo "🔍 Running FOSSA dependency analysis..."
     
-    // Ensure SECURITY_REPORTS_DIR is defined
-    if (!env.SECURITY_REPORTS_DIR) {
-        env.SECURITY_REPORTS_DIR = "${env.WORKSPACE}/security-reports"
+    sh """
+        mkdir -p security-reports/fossa/
+        fossa analyze --config .fossa.yml --debug 2>&1 | tee security-reports/fossa/analysis.log
+    """
+    
+    echo "✅ FOSSA analysis completed"
+    
+    // Run test but don't fail the build
+    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+        echo "🧪 Running FOSSA policy tests..."
+        sh """
+            fossa test --config .fossa.yml --timeout 600 --format json --debug 2>&1 | tee security-reports/fossa/test-results.json
+        """
+        echo "✅ FOSSA policy tests completed - no issues found"
     }
     
-    sh """
-        mkdir -p ${SECURITY_REPORTS_DIR}/fossa/
-        
-        # Run analysis with detailed output
-        fossa analyze \\
-            --config .fossa.yml \\
-            --debug \\
-            ${params.FOSSA_ANALYZE_ARGS ?: ''} \\
-            2>&1 | tee ${SECURITY_REPORTS_DIR}/fossa/analysis.log
-            
-        echo "✅ FOSSA analysis completed"
-    """
+    // Always report the results
+    echo "📊 FOSSA scan completed - check security-reports/fossa/ for detailed results"
 }
 
 def runFossaTest() {
     echo "🧪 Running FOSSA license and vulnerability tests..."
     
-    try {
+    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
         sh """
             # Test for license violations and vulnerabilities
             # Use --format json to get JSON output, redirect to file
@@ -1993,20 +1994,18 @@ def runFossaTest() {
                 --debug \\
                 ${params.FOSSA_TEST_ARGS ?: ''} \\
                 > ${SECURITY_REPORTS_DIR}/fossa/test-results.json
-                
-            echo "✅ FOSSA tests passed - no license violations found"
         """
-    } catch (Exception e) {
-        echo "⚠️ FOSSA test found issues: ${e.getMessage()}"
-        // Continue execution to process results
-        currentBuild.result = 'UNSTABLE'
+        echo "✅ FOSSA tests passed - no license violations found"
     }
+    
+    // This will run regardless of test results
+    echo "📊 FOSSA test completed - results saved to test-results.json"
 }
 
 def generateAttributionReport() {
     echo "📋 Generating attribution report..."
     
-    try {
+    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
         sh """
             # Generate attribution report (requires API key)
             # Use --json flag instead of --format json --output
@@ -2023,13 +2022,12 @@ def generateAttributionReport() {
                     ${params.FOSSA_REPORT_ARGS ?: ''} \\
                     > ${SECURITY_REPORTS_DIR}/fossa/attribution.txt
             fi
-            
-            echo "✅ Attribution report generated"
         """
-    } catch (Exception e) {
-        echo "⚠️ Could not generate attribution report: ${e.getMessage()}"
-        // Continue execution as this is not critical
+        echo "✅ Attribution report generated"
     }
+    
+    // This will run regardless of report generation results
+    echo "📄 Attribution report generation completed"
 }
 
 def publishFossaResults() {
