@@ -1809,16 +1809,41 @@ def installFossaCli() {
             # Create local bin directory
             mkdir -p \${HOME}/bin
             
-            # Download and install FOSSA CLI locally
-            curl -H 'Cache-Control: no-cache' -L https://github.com/fossas/fossa-cli/releases/latest/download/fossa-linux-amd64 -o \${HOME}/bin/fossa
+            # Get the latest release version and download URL
+            echo "Getting latest FOSSA CLI release..."
+            LATEST_VERSION=\$(curl -s https://api.github.com/repos/fossas/fossa-cli/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+            echo "Latest version: \$LATEST_VERSION"
+            
+            # Download with explicit version (more reliable)
+            DOWNLOAD_URL="https://github.com/fossas/fossa-cli/releases/download/\$LATEST_VERSION/fossa_\${LATEST_VERSION}_linux_amd64.tar.gz"
+            echo "Downloading from: \$DOWNLOAD_URL"
+            
+            # Download and extract
+            curl -L "\$DOWNLOAD_URL" -o /tmp/fossa.tar.gz
+            
+            # Verify download
+            if [ ! -f /tmp/fossa.tar.gz ] || [ ! -s /tmp/fossa.tar.gz ]; then
+                echo "❌ Download failed or file is empty"
+                exit 1
+            fi
+            
+            # Extract
+            tar -xzf /tmp/fossa.tar.gz -C /tmp/
+            
+            # Move binary to bin directory
+            mv /tmp/fossa \${HOME}/bin/fossa
             
             # Make executable
             chmod +x \${HOME}/bin/fossa
+            
+            # Clean up
+            rm -f /tmp/fossa.tar.gz
             
             # Add to PATH for this session
             export PATH=\${HOME}/bin:\$PATH
             
             # Verify installation
+            echo "Verifying FOSSA CLI installation..."
             \${HOME}/bin/fossa --version
         """
         
