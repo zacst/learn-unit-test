@@ -2184,23 +2184,11 @@ def runScanCodeLicenseCheck() {
         
         echo "Running ScanCode license scan..."
         
-        # Run comprehensive license scan
-        scancode --license --copyright --summary --json license-results.json --html license-report.html .
+        # Run comprehensive license scan with proper options
+        scancode --license --copyright --classify --summary --json license-results.json --html license-report.html .
         
-        # ... rest of your scanning code
-    '''
-        
-    // Run ScanCode license scan
-    sh '''
-        source scancode-env/bin/activate
-        
-        echo "Running ScanCode license scan..."
-        
-        # Run comprehensive license scan
-        scancode --license --copyright --summary --json license-results.json --html license-report.html .
-        
-        # Also generate a simple text summary
-        scancode --license --copyright --summary --output-format jsonlines . | \
+        # Also generate a simple text summary using basic scan
+        scancode --license --copyright --output-format jsonlines . | \
         jq -r 'select(.type == "file" and .licenses) | "\\(.path): \\(.licenses[].short_name // .licenses[].key)"' > license-summary.txt
         
         # Generate license compliance report
@@ -2208,46 +2196,46 @@ def runScanCodeLicenseCheck() {
 <!DOCTYPE html>
 <html>
 <head>
-<title>ScanCode License Compliance Report</title>
-<style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    .header { background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-    .summary { background-color: #e6f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-    .license-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-    .license-table th, .license-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    .license-table th { background-color: #f2f2f2; }
-    .risk-high { background-color: #ffe6e6; }
-    .risk-medium { background-color: #fff3e6; }
-    .risk-low { background-color: #e6ffe6; }
-    .timestamp { color: #666; font-size: 0.9em; }
-    pre { background-color: #f5f5f5; padding: 10px; overflow-x: auto; }
-</style>
+    <title>ScanCode License Compliance Report</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .summary { background-color: #e6f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .license-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        .license-table th, .license-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .license-table th { background-color: #f2f2f2; }
+        .risk-high { background-color: #ffe6e6; }
+        .risk-medium { background-color: #fff3e6; }
+        .risk-low { background-color: #e6ffe6; }
+        .timestamp { color: #666; font-size: 0.9em; }
+        pre { background-color: #f5f5f5; padding: 10px; overflow-x: auto; }
+    </style>
 </head>
 <body>
-<div class="header">
-    <h1>📋 ScanCode License Compliance Report</h1>
-    <p class="timestamp">Generated: $(date)</p>
-</div>
-
-<div class="summary">
-    <h2>📊 Quick Summary</h2>
-    <div id="summary-content">
+    <div class="header">
+        <h1>📋 ScanCode License Compliance Report</h1>
+        <p class="timestamp">Generated: $(date)</p>
+    </div>
+    
+    <div class="summary">
+        <h2>📊 Quick Summary</h2>
+        <div id="summary-content">
 EOF
         
         # Parse results and add summary
         if [ -f license-results.json ]; then
-            echo "        <p><strong>Total Files Scanned:</strong> $(jq '.headers[0].summary.file_count' license-results.json)</p>" >> license-compliance.html
-            echo "        <p><strong>Files with Licenses:</strong> $(jq '.headers[0].summary.license_clarity_score.total' license-results.json)</p>" >> license-compliance.html
-            echo "        <p><strong>Unique Licenses Found:</strong> $(jq -r '.license_references | length' license-results.json)</p>" >> license-compliance.html
+            echo "        <p><strong>Total Files Scanned:</strong> $(jq -r '.headers[0].summary.file_count // "N/A"' license-results.json)</p>" >> license-compliance.html
+            echo "        <p><strong>Files with Licenses:</strong> $(jq -r '.headers[0].summary.license_clarity_score.total // "N/A"' license-results.json)</p>" >> license-compliance.html
+            echo "        <p><strong>Unique Licenses Found:</strong> $(jq -r '.license_references | length // "N/A"' license-results.json)</p>" >> license-compliance.html
         fi
         
         cat >> license-compliance.html << 'EOF'
+        </div>
     </div>
-</div>
-
-<div class="summary">
-    <h2>⚖️ License Summary</h2>
-    <pre>
+    
+    <div class="summary">
+        <h2>⚖️ License Summary</h2>
+        <pre>
 EOF
         
         # Add license summary
@@ -2256,17 +2244,19 @@ EOF
             if [ $(wc -l < license-summary.txt) -gt 20 ]; then
                 echo "... (truncated, see full report for complete list)" >> license-compliance.html
             fi
+        else
+            echo "No license summary available" >> license-compliance.html
         fi
         
         cat >> license-compliance.html << 'EOF'
-    </pre>
-</div>
-
-<div class="summary">
-    <h2>📄 Full Report</h2>
-    <p>For the complete detailed report with all findings, <a href="license-report.html">click here to view the full ScanCode HTML report</a></p>
-</div>
-
+        </pre>
+    </div>
+    
+    <div class="summary">
+        <h2>📄 Full Report</h2>
+        <p>For the complete detailed report with all findings, <a href="license-report.html">click here to view the full ScanCode HTML report</a></p>
+    </div>
+    
 </body>
 </html>
 EOF
