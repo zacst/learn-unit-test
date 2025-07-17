@@ -1950,15 +1950,6 @@ targets:
   auto:
     type: auto
     path: .
-
-# Custom filters (optional)
-experimental:
-  gradle:
-    configurations-only: true
-  maven:
-    resolve-dependencies: true
-  npm:
-    production-only: ${params.FOSSA_NPM_PRODUCTION_ONLY ?: 'false'}
 """
     
     echo "✅ FOSSA configuration created"
