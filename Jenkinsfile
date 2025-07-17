@@ -2000,13 +2000,14 @@ def runFossaTest() {
     try {
         sh """
             # Test for license violations and vulnerabilities
-            # This will exit with non-zero code if issues are found
+            # Use --format json to get JSON output, redirect to file
             fossa test \\
                 --config .fossa.yml \\
                 --timeout ${params.FOSSA_TEST_TIMEOUT ?: '600'} \\
-                --output ${SECURITY_REPORTS_DIR}/fossa/test-results.json \\
+                --format json \\
                 --debug \\
-                ${params.FOSSA_TEST_ARGS ?: ''}
+                ${params.FOSSA_TEST_ARGS ?: ''} \\
+                > ${SECURITY_REPORTS_DIR}/fossa/test-results.json
                 
             echo "✅ FOSSA tests passed - no license violations found"
         """
@@ -2023,18 +2024,19 @@ def generateAttributionReport() {
     try {
         sh """
             # Generate attribution report (requires API key)
+            # Use --json flag instead of --format json --output
             fossa report attribution \\
                 --config .fossa.yml \\
-                --format json \\
-                --output ${SECURITY_REPORTS_DIR}/fossa/attribution.json \\
-                ${params.FOSSA_REPORT_ARGS ?: ''}
+                --json \\
+                ${params.FOSSA_REPORT_ARGS ?: ''} \\
+                > ${SECURITY_REPORTS_DIR}/fossa/attribution.json
                 
-            # Also generate HTML report if requested
+            # Also generate text report if requested
             if [ "${params.GENERATE_HTML_REPORT ?: 'false'}" = "true" ]; then
                 fossa report attribution \\
                     --config .fossa.yml \\
-                    --format html \\
-                    --output ${SECURITY_REPORTS_DIR}/fossa/attribution.html
+                    ${params.FOSSA_REPORT_ARGS ?: ''} \\
+                    > ${SECURITY_REPORTS_DIR}/fossa/attribution.txt
             fi
             
             echo "✅ Attribution report generated"
