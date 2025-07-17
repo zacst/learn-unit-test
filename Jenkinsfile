@@ -1712,60 +1712,6 @@ def convertToCheckstyle(jsonReport) {
     return xml.toString()
 }
 
-// Alternative simpler approach - just fix the formatting
-def runLintingWithAutofix() {
-    echo "💅 Running .NET Linter with auto-fix..."
-    try {
-        sh "mkdir -p ${LINTER_REPORTS_DIR}"
-        
-        def solutionFile = sh(script: "find . -name '*.sln' -print -quit", returnStdout: true).trim()
-        if (solutionFile.isEmpty()) {
-            error "❌ Could not find a solution file (.sln) in the workspace."
-        }
-        
-        sh """
-            dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION} || true
-            export PATH="\$PATH:\$HOME/.dotnet/tools"
-        """
-        
-        // First, try to fix issues automatically
-        def fixResult = sh(
-            script: """
-                export PATH="\$PATH:\$HOME/.dotnet/tools"
-                dotnet format '${solutionFile}' --include-generated
-            """,
-            returnStatus: true
-        )
-        
-        if (fixResult == 0) {
-            echo "✅ Code formatting applied successfully."
-            
-            // Check if there are any remaining issues
-            def verifyResult = sh(
-                script: """
-                    export PATH="\$PATH:\$HOME/.dotnet/tools"
-                    dotnet format '${solutionFile}' --verify-no-changes
-                """,
-                returnStatus: true
-            )
-            
-            if (verifyResult == 0) {
-                echo "✅ All formatting issues resolved."
-            } else {
-                echo "⚠️ Some formatting issues remain after auto-fix."
-                currentBuild.result = 'UNSTABLE'
-            }
-        } else {
-            echo "⚠️ Auto-fix encountered issues."
-            currentBuild.result = 'UNSTABLE'
-        }
-        
-    } catch (Exception e) {
-        echo "❌ Linting check encountered an error: ${e.message}"
-        currentBuild.result = 'UNSTABLE'
-    }
-}
-
 /**
  * Runs Gitleaks to detect hardcoded secrets in the repository.
  */
@@ -1858,12 +1804,27 @@ def installFossaCli() {
     
     if (fossaInstalled == 'not-found') {
         sh """
-            echo "Installing FOSSA CLI..."
-            curl -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/fossas/fossa-cli/master/install-latest.sh | sudo bash
+            echo "Installing FOSSA CLI to local directory..."
+            
+            # Create local bin directory
+            mkdir -p \${HOME}/bin
+            
+            # Download and install FOSSA CLI locally
+            curl -H 'Cache-Control: no-cache' -L https://github.com/fossas/fossa-cli/releases/latest/download/fossa-linux-amd64 -o \${HOME}/bin/fossa
+            
+            # Make executable
+            chmod +x \${HOME}/bin/fossa
+            
+            # Add to PATH for this session
+            export PATH=\${HOME}/bin:\$PATH
             
             # Verify installation
-            fossa --version
+            \${HOME}/bin/fossa --version
         """
+        
+        // Update PATH for subsequent steps
+        env.PATH = "${env.HOME}/bin:${env.PATH}"
+        
     } else {
         echo "✅ FOSSA CLI already installed: ${fossaInstalled}"
         sh "fossa --version"
@@ -2081,19 +2042,4 @@ print(f'Generated {warnings_count} warnings')
             )
         }
     }
-}
-
-// Helper function to setup FOSSA in pipeline
-def setupFossaParameters() {
-    // Add these parameters to your Jenkins job
-    return [
-        string(name: 'FOSSA_TEAM', defaultValue: 'default', description: 'FOSSA team name'),
-        string(name: 'FOSSA_POLICY', defaultValue: 'default', description: 'FOSSA policy to apply'),
-        string(name: 'FOSSA_TEST_TIMEOUT', defaultValue: '600', description: 'FOSSA test timeout in seconds'),
-        booleanParam(name: 'GENERATE_HTML_REPORT', defaultValue: false, description: 'Generate HTML attribution report'),
-        booleanParam(name: 'FOSSA_NPM_PRODUCTION_ONLY', defaultValue: true, description: 'Only scan npm production dependencies'),
-        string(name: 'FOSSA_ANALYZE_ARGS', defaultValue: '', description: 'Additional args for fossa analyze'),
-        string(name: 'FOSSA_TEST_ARGS', defaultValue: '', description: 'Additional args for fossa test'),
-        string(name: 'FOSSA_REPORT_ARGS', defaultValue: '', description: 'Additional args for fossa report')
-    ]
 }
