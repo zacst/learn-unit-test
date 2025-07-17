@@ -1443,7 +1443,8 @@ def publishSecurityResults() {
         if (fileExists("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")) {
             recordIssues enabledForFailure: true,
                        tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif", id: 'semgrep')],
-                       name: 'Semgrep Results',
+                       name: 'SAST (Semgrep)',
+                       id: 'semgrep',
                        qualityGates: [[threshold: 1, type: 'TOTAL_ERROR', unstable: true]]
         }
         
@@ -1451,7 +1452,8 @@ def publishSecurityResults() {
         if (fileExists("${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")) {
             recordIssues enabledForFailure: true,
                        tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif", id: 'trivy')],
-                          name: 'Trivy Results',
+                          name: 'Security (Trivy)',
+                          id: 'trivy',
                        qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
         }
         
@@ -1687,7 +1689,9 @@ def publishCheckstyleReport(String reportFile) {
         qualityGates: [
             [threshold: 1, type: 'TOTAL', unstable: true],
             [threshold: 10, type: 'TOTAL', failed: true]
-        ]
+        ],
+        name: 'Linting',
+        id: 'dotnet-format',
     )
 }
 
@@ -1732,7 +1736,7 @@ def runSecretsScan() {
         def reportFile = "${SECRETS_REPORTS_DIR}/gitleaks-report.sarif"
         if (fileExists(reportFile)) {
             recordIssues(
-                tool: sarif(pattern: reportFile, id: 'gitleaks', name: 'Gitleaks Secrets'),
+                tool: sarif(pattern: reportFile, id: 'gitleaks', name: 'Secrets'),
                 enabledForFailure: true,
                 qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]]
             )
@@ -2210,7 +2214,7 @@ def publishWarnings() {
                         )
                     ],
                     qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]],
-                    name: 'FOSSA License & Vulnerability Issues',
+                    name: 'License & Vulnerability',
                     id: 'fossa-scan'
                 )
             } catch (Exception e) {
