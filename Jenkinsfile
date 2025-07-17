@@ -42,6 +42,10 @@ pipeline {
         GITLEAKS_VERSION = '8.18.2'
         LICENSE_CHECKER_VERSION = '3.0.0'
 
+        // FOSSA Configuration
+        FOSSA_API_KEY = credentials('fossa-api-key')
+        SECURITY_REPORTS_DIR = 'security-reports'
+
         // DAST Configuration
         DAST_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/dast"
     }
@@ -712,8 +716,7 @@ pipeline {
                     steps {
                         script {
                             try {
-                                sh "mkdir -p ${SECURITY_REPORTS_DIR}/license-check"
-                                runLicenseCheck() // This will call the new, improved helper function
+                                runFossaLicenseCheck()
                             } catch (Exception e) {
                                 echo "❌ License check failed: ${e.getMessage()}"
                                 if (params.FAIL_ON_SECURITY_ISSUES) {
@@ -1811,271 +1814,287 @@ def runSecretsScan() {
     }
 }
 
-def runLicenseCheck() {
-    echo "⚖️ Running .NET License Compliance Check..."
-
-    // This file defines your license policy.
-    writeFile file: 'allowed-licenses.json', text: '''
-    {
-      "allowed": [
-        "MIT", "Apache-2.0", "BSD-3-Clause", "BSD-2-Clause", "ISC", "MS-PL"
-      ]
-    }
-    '''
-    
-    def solutionFile = sh(script: "find . -name '*.sln' -print -quit", returnStdout: true).trim()
-    if (solutionFile.isEmpty()) {
-        error "❌ Could not find a solution file (.sln) for the license check."
-    }
-    echo "Found solution file for license check: ${solutionFile}"
+def runFossaLicenseCheck() {
+    echo "⚖️ Running FOSSA License Compliance Check..."
     
     try {
-        sh """
-            mkdir -p ${SECURITY_REPORTS_DIR}/license-check/
-            
-            echo "🔍 Scanning solution for dependency licenses..."
-            
-            # Get package list with versions
-            dotnet list '${solutionFile}' package --format json > ${SECURITY_REPORTS_DIR}/license-check/packages-list.json
-            
-            # Enhanced Python script to get license info from NuGet API
-            python3 -c "
-import json
-import urllib.request
-import urllib.parse
-import xml.etree.ElementTree as ET
-import os
-import sys
-import time
-
-def get_package_license_from_nuget(package_name, version):
-    '''Get license information from NuGet API'''
-    try:
-        # Try the v3 API first
-        api_url = f'https://api.nuget.org/v3-flatcontainer/{package_name.lower()}/index.json'
-        with urllib.request.urlopen(api_url, timeout=10) as response:
-            if response.status == 200:
-                # Get package metadata
-                metadata_url = f'https://api.nuget.org/v3/registration5-semver1/{package_name.lower()}/index.json'
-                with urllib.request.urlopen(metadata_url, timeout=10) as meta_response:
-                    if meta_response.status == 200:
-                        meta_data = json.loads(meta_response.read().decode('utf-8'))
-                        
-                        # Look for license info in the metadata
-                        for item in meta_data.get('items', []):
-                            for entry in item.get('items', []):
-                                catalog_entry = entry.get('catalogEntry', {})
-                                if catalog_entry.get('version') == version:
-                                    license_url = catalog_entry.get('licenseUrl', '')
-                                    license_expr = catalog_entry.get('licenseExpression', '')
-                                    
-                                    if license_expr:
-                                        return license_expr
-                                    elif 'mit' in license_url.lower():
-                                        return 'MIT'
-                                    elif 'apache' in license_url.lower():
-                                        return 'Apache-2.0'
-                                    elif 'bsd' in license_url.lower():
-                                        return 'BSD-3-Clause'
-                                    elif license_url:
-                                        return f'Custom: {license_url}'
-    except Exception as e:
-        print(f'Error getting license for {package_name}: {e}')
-    
-    return 'Unknown'
-
-def process_packages():
-    '''Process the packages and get license information'''
-    packages_with_licenses = []
-    
-    try:
-        with open('${SECURITY_REPORTS_DIR}/license-check/packages-list.json', 'r') as f:
-            data = json.load(f)
+        // Install FOSSA CLI if not already installed
+        installFossaCli()
         
-        for project in data.get('projects', []):
-            project_path = project.get('path', '')
-            
-            for framework in project.get('frameworks', []):
-                framework_name = framework.get('framework', '')
-                
-                # Process top-level packages
-                for package in framework.get('topLevelPackages', []):
-                    package_name = package.get('id', '')
-                    package_version = package.get('requestedVersion', '')
-                    
-                    if package_name and package_version:
-                        print(f'Getting license for {package_name} {package_version}...')
-                        license_type = get_package_license_from_nuget(package_name, package_version)
-                        
-                        packages_with_licenses.append({
-                            'PackageName': package_name,
-                            'PackageVersion': package_version,
-                            'LicenseType': license_type,
-                            'Project': project_path,
-                            'Framework': framework_name,
-                            'IsTransitive': False
-                        })
-                        
-                        # Small delay to avoid rate limiting
-                        time.sleep(0.1)
-                
-                # Process transitive packages
-                for package in framework.get('transitivePackages', []):
-                    package_name = package.get('id', '')
-                    package_version = package.get('requestedVersion', '')
-                    
-                    if package_name and package_version:
-                        print(f'Getting license for transitive {package_name} {package_version}...')
-                        license_type = get_package_license_from_nuget(package_name, package_version)
-                        
-                        packages_with_licenses.append({
-                            'PackageName': package_name,
-                            'PackageVersion': package_version,
-                            'LicenseType': license_type,
-                            'Project': project_path,
-                            'Framework': framework_name,
-                            'IsTransitive': True
-                        })
-                        
-                        # Small delay to avoid rate limiting
-                        time.sleep(0.1)
-    
-    except Exception as e:
-        print(f'Error processing packages: {e}')
-        return []
-    
-    # Save the results
-    with open('${SECURITY_REPORTS_DIR}/license-check/packages-with-licenses.json', 'w') as f:
-        json.dump(packages_with_licenses, f, indent=2)
-    
-    print(f'Processed {len(packages_with_licenses)} packages')
-    return packages_with_licenses
-
-if __name__ == '__main__':
-    process_packages()
-"
-        """
+        // Configure FOSSA settings
+        configureFossa()
         
-        // Validate licenses against policy
-        validateLicenses()
-        echo "✅ All dependency licenses are compliant."
+        // Run dependency analysis
+        runFossaAnalysis()
+        
+        // Test for license and vulnerability issues
+        runFossaTest()
+        
+        // Generate attribution report
+        generateAttributionReport()
+        
+        echo "✅ FOSSA license compliance check completed successfully."
         
     } catch (Exception e) {
-        echo "❌ License check failed: ${e.getMessage()}"
+        echo "❌ FOSSA license check failed: ${e.getMessage()}"
         if (params.FAIL_ON_SECURITY_ISSUES) {
-            error("Failing build due to non-compliant licenses.")
+            error("Failing build due to FOSSA license compliance issues.")
         } else {
             currentBuild.result = 'UNSTABLE'
         }
     } finally {
-        // Always publish results to dashboard
-        publishLicenseResults()
+        // Always publish results
+        publishFossaResults()
     }
 }
 
-def validateLicenses() {
+def installFossaCli() {
+    echo "🔧 Installing FOSSA CLI..."
+    
+    // Check if FOSSA CLI is already installed
+    def fossaInstalled = sh(
+        script: "which fossa || echo 'not-found'",
+        returnStdout: true
+    ).trim()
+    
+    if (fossaInstalled == 'not-found') {
+        sh """
+            echo "Installing FOSSA CLI..."
+            curl -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/fossas/fossa-cli/master/install-latest.sh | sudo bash
+            
+            # Verify installation
+            fossa --version
+        """
+    } else {
+        echo "✅ FOSSA CLI already installed: ${fossaInstalled}"
+        sh "fossa --version"
+    }
+}
+
+def configureFossa() {
+    echo "⚙️ Configuring FOSSA..."
+    
+    // Create FOSSA config file
+    writeFile file: '.fossa.yml', text: """
+version: 3
+server: https://app.fossa.com
+apiKey: \${FOSSA_API_KEY}
+
+project:
+  name: "${env.JOB_NAME}"
+  team: "${params.FOSSA_TEAM ?: 'default'}"
+  policy: "${params.FOSSA_POLICY ?: 'default'}"
+  
+targets:
+  # Auto-detect all supported languages
+  - type: auto
+    path: .
+    
+# Configure specific language settings if needed
+# nuget:
+#   cmd: dotnet
+# maven:
+#   cmd: mvn
+# npm:
+#   cmd: npm
+    
+# Custom filters (optional)
+experimental:
+  gradle:
+    configurations-enabled: true
+  maven:
+    resolve-dependencies: true
+  npm:
+    production-only: ${params.FOSSA_NPM_PRODUCTION_ONLY ?: 'false'}
+"""
+
+    // Validate API key is set
+    if (!env.FOSSA_API_KEY) {
+        error("❌ FOSSA_API_KEY environment variable is required. Please set it in Jenkins credentials.")
+    }
+    
+    echo "✅ FOSSA configuration created"
+}
+
+def runFossaAnalysis() {
+    echo "🔍 Running FOSSA dependency analysis..."
+    
+    sh """
+        mkdir -p ${SECURITY_REPORTS_DIR}/fossa/
+        
+        # Run analysis with detailed output
+        fossa analyze \\
+            --config .fossa.yml \\
+            --output ${SECURITY_REPORTS_DIR}/fossa/analysis.json \\
+            --debug \\
+            ${params.FOSSA_ANALYZE_ARGS ?: ''}
+            
+        echo "✅ FOSSA analysis completed"
+    """
+}
+
+def runFossaTest() {
+    echo "🧪 Running FOSSA license and vulnerability tests..."
+    
+    sh """
+        # Test for license violations and vulnerabilities
+        # This will exit with non-zero code if issues are found
+        fossa test \\
+            --config .fossa.yml \\
+            --timeout ${params.FOSSA_TEST_TIMEOUT ?: '600'} \\
+            --output ${SECURITY_REPORTS_DIR}/fossa/test-results.json \\
+            --debug \\
+            ${params.FOSSA_TEST_ARGS ?: ''}
+            
+        echo "✅ FOSSA tests passed - no license violations found"
+    """
+}
+
+def generateAttributionReport() {
+    echo "📋 Generating attribution report..."
+    
+    sh """
+        # Generate attribution report (requires API key)
+        fossa report attribution \\
+            --config .fossa.yml \\
+            --format json \\
+            --output ${SECURITY_REPORTS_DIR}/fossa/attribution.json \\
+            ${params.FOSSA_REPORT_ARGS ?: ''}
+            
+        # Also generate HTML report if requested
+        if [ "${params.GENERATE_HTML_REPORT ?: 'false'}" = "true" ]; then
+            fossa report attribution \\
+                --config .fossa.yml \\
+                --format html \\
+                --output ${SECURITY_REPORTS_DIR}/fossa/attribution.html
+        fi
+        
+        echo "✅ Attribution report generated"
+    """
+}
+
+def publishFossaResults() {
+    echo "📊 Publishing FOSSA results..."
+    
+    // Archive all FOSSA reports
+    archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/fossa/**/*", allowEmptyArchive: true
+    
+    // Parse and publish test results if available
+    if (fileExists("${SECURITY_REPORTS_DIR}/fossa/test-results.json")) {
+        publishFossaTestResults()
+    }
+    
+    // Generate Jenkins-friendly warnings from FOSSA results
+    generateFossaWarnings()
+}
+
+def publishFossaTestResults() {
+    echo "📈 Publishing FOSSA test results..."
+    
+    def testResultsFile = "${SECURITY_REPORTS_DIR}/fossa/test-results.json"
+    
+    if (fileExists(testResultsFile)) {
+        def testResults = readJSON file: testResultsFile
+        
+        // Create summary for build description
+        def summary = """
+        FOSSA Scan Results:
+        - License Issues: ${testResults.issues?.license?.size() ?: 0}
+        - Vulnerability Issues: ${testResults.issues?.vulnerability?.size() ?: 0}
+        - Total Dependencies: ${testResults.dependencies?.size() ?: 0}
+        """
+        
+        // Add to build description
+        currentBuild.description = (currentBuild.description ?: '') + "\n" + summary
+        
+        echo "📊 FOSSA Results Summary:\n${summary}"
+    }
+}
+
+def generateFossaWarnings() {
+    echo "⚠️ Generating FOSSA warnings for Jenkins..."
+    
     sh """
         python3 -c "
 import json
 import os
 import sys
 
-# Load allowed licenses
-with open('allowed-licenses.json', 'r') as f:
-    allowed = json.load(f)['allowed']
+warnings_text = ''
+warnings_count = 0
 
-# Process license report
-report_dir = '${SECURITY_REPORTS_DIR}/license-check/'
-violations = []
-
-# Look for our enhanced license file
-license_file = os.path.join(report_dir, 'packages-with-licenses.json')
-if os.path.exists(license_file):
-    with open(license_file, 'r') as f:
-        packages = json.load(f)
-    
-    for package in packages:
-        license_type = package.get('LicenseType', 'Unknown')
-        package_name = package.get('PackageName', 'Unknown')
-        package_version = package.get('PackageVersion', 'Unknown')
-        
-        # Skip unknown licenses for now (manual review needed)
-        if license_type != 'Unknown' and license_type not in allowed:
-            # Handle custom license URLs
-            if license_type.startswith('Custom:'):
-                license_display = license_type
-            else:
-                license_display = license_type
+# Check for test results
+test_results_file = '${SECURITY_REPORTS_DIR}/fossa/test-results.json'
+if os.path.exists(test_results_file):
+    with open(test_results_file, 'r') as f:
+        try:
+            test_results = json.load(f)
             
-            violations.append({
-                'package': package_name,
-                'license': license_display,
-                'version': package_version,
-                'project': package.get('Project', ''),
-                'is_transitive': package.get('IsTransitive', False)
-            })
+            # Process license issues
+            license_issues = test_results.get('issues', {}).get('license', [])
+            for issue in license_issues:
+                dep_name = issue.get('dependency', {}).get('name', 'Unknown')
+                license_type = issue.get('license', {}).get('name', 'Unknown')
+                rule = issue.get('rule', {}).get('name', 'Unknown rule')
+                
+                warnings_text += f'WARNING: License issue in {dep_name} - {license_type} violates rule: {rule}\\n'
+                warnings_count += 1
+            
+            # Process vulnerability issues
+            vuln_issues = test_results.get('issues', {}).get('vulnerability', [])
+            for issue in vuln_issues:
+                dep_name = issue.get('dependency', {}).get('name', 'Unknown')
+                vuln_id = issue.get('vulnerability', {}).get('id', 'Unknown')
+                severity = issue.get('vulnerability', {}).get('severity', 'Unknown')
+                
+                warnings_text += f'WARNING: Vulnerability {vuln_id} ({severity}) found in {dep_name}\\n'
+                warnings_count += 1
+                
+        except json.JSONDecodeError:
+            warnings_text += 'ERROR: Could not parse FOSSA test results\\n'
+            warnings_count += 1
 
-# Generate violations report
-violations_file = '${SECURITY_REPORTS_DIR}/license-violations.json'
-with open(violations_file, 'w') as f:
-    json.dump({
-        'violations': violations,
-        'total_violations': len(violations),
-        'allowed_licenses': allowed
-    }, f, indent=2)
+# Write warnings file
+with open('${SECURITY_REPORTS_DIR}/fossa-warnings.txt', 'w') as f:
+    f.write(warnings_text)
 
-print(f'Total violations found: {len(violations)}')
-if violations:
-    for violation in violations:
-        transitive = ' (transitive)' if violation.get('is_transitive', False) else ''
-        print(f'  - {violation["package"]} ({violation["version"]}): {violation["license"]}{transitive}')
-    sys.exit(1)
-else:
-    print('No license violations found')
+print(f'Generated {warnings_count} warnings')
 "
     """
-}
-
-def publishLicenseResults() {
-    // Archive the raw reports
-    archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/license-check/**/*", allowEmptyArchive: true
-    archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/license-violations.json", allowEmptyArchive: true
     
-    // Check if violations file exists and has content
-    def violationsFile = "${SECURITY_REPORTS_DIR}/license-violations.json"
-    if (fileExists(violationsFile)) {
-        def violationsContent = readFile(violationsFile)
-        def violations = readJSON text: violationsContent
+    // Publish warnings if any exist
+    if (fileExists("${SECURITY_REPORTS_DIR}/fossa-warnings.txt")) {
+        def warningsContent = readFile("${SECURITY_REPORTS_DIR}/fossa-warnings.txt")
         
-        if (violations.total_violations > 0) {
-            // Convert JSON to a format that Jenkins can understand
-            def warningsText = ""
-            violations.violations.each { violation ->
-                def transitiveNote = violation.is_transitive ? " (transitive dependency)" : ""
-                warningsText += "WARNING: License violation in package '${violation.package}' version '${violation.version}' - License: '${violation.license}' is not in allowed list${transitiveNote}\n"
-            }
-            
-            // Write to a simple text file for Jenkins warnings plugin
-            writeFile file: "${SECURITY_REPORTS_DIR}/license-warnings.txt", text: warningsText
-            
-            // Use a simple approach to record issues
+        if (warningsContent.trim()) {
             recordIssues(
                 enabledForFailure: false,
                 aggregatingResults: false,
                 tools: [
                     issues(
-                        pattern: "${SECURITY_REPORTS_DIR}/license-warnings.txt",
-                        name: 'License Violations'
+                        pattern: "${SECURITY_REPORTS_DIR}/fossa-warnings.txt",
+                        name: 'FOSSA Issues'
                     )
                 ],
                 qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]],
-                name: 'License Compliance',
-                id: 'license-check'
+                name: 'FOSSA License & Vulnerability Issues',
+                id: 'fossa-scan'
             )
-        } else {
-            echo "✅ No license violations found - skipping warnings publication"
         }
-    } else {
-        echo "⚠️ License violations file not found - skipping warnings publication"
     }
+}
+
+// Helper function to setup FOSSA in pipeline
+def setupFossaParameters() {
+    // Add these parameters to your Jenkins job
+    return [
+        string(name: 'FOSSA_TEAM', defaultValue: 'default', description: 'FOSSA team name'),
+        string(name: 'FOSSA_POLICY', defaultValue: 'default', description: 'FOSSA policy to apply'),
+        string(name: 'FOSSA_TEST_TIMEOUT', defaultValue: '600', description: 'FOSSA test timeout in seconds'),
+        booleanParam(name: 'GENERATE_HTML_REPORT', defaultValue: false, description: 'Generate HTML attribution report'),
+        booleanParam(name: 'FOSSA_NPM_PRODUCTION_ONLY', defaultValue: true, description: 'Only scan npm production dependencies'),
+        string(name: 'FOSSA_ANALYZE_ARGS', defaultValue: '', description: 'Additional args for fossa analyze'),
+        string(name: 'FOSSA_TEST_ARGS', defaultValue: '', description: 'Additional args for fossa test'),
+        string(name: 'FOSSA_REPORT_ARGS', defaultValue: '', description: 'Additional args for fossa report')
+    ]
 }
