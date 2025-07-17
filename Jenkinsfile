@@ -1945,12 +1945,12 @@ project:
   name: "${env.JOB_NAME}"
   team: "${params.FOSSA_TEAM ?: 'default'}"
   policy: "${params.FOSSA_POLICY ?: 'default'}"
-  
+
 targets:
-  # Auto-detect all supported languages
-  - type: auto
+  auto:
+    type: auto
     path: .
-    
+
 # Configure specific language settings if needed
 # nuget:
 #   cmd: dotnet
@@ -1958,7 +1958,7 @@ targets:
 #   cmd: mvn
 # npm:
 #   cmd: npm
-    
+
 # Custom filters (optional)
 experimental:
   gradle:
