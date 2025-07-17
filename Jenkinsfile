@@ -1982,20 +1982,16 @@ def runFossaTest() {
     
     catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
         sh """
-            # Test for license violations and vulnerabilities
-            # Use --format json to get JSON output, redirect to file
             fossa test \\
                 --config .fossa.yml \\
                 --timeout ${params.FOSSA_TEST_TIMEOUT ?: '600'} \\
                 --format json \\
-                --debug \\
                 ${params.FOSSA_TEST_ARGS ?: ''} \\
                 > ${SECURITY_REPORTS_DIR}/fossa/test-results.json
         """
         echo "✅ FOSSA tests passed - no license violations found"
     }
     
-    // This will run regardless of test results
     echo "📊 FOSSA test completed - results saved to test-results.json"
 }
 
