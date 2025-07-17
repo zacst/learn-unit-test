@@ -1951,18 +1951,10 @@ targets:
     type: auto
     path: .
 
-# Configure specific language settings if needed
-# nuget:
-#   cmd: dotnet
-# maven:
-#   cmd: mvn
-# npm:
-#   cmd: npm
-
 # Custom filters (optional)
 experimental:
   gradle:
-    configurations-enabled: true
+    configurations-only: true
   maven:
     resolve-dependencies: true
   npm:
