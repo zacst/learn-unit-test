@@ -1794,7 +1794,6 @@ def runFossaLicenseCheck() {
     }
 }
 
-
 def installFossaCli() {
     echo "🔧 Installing FOSSA CLI..."
     
@@ -1940,7 +1939,7 @@ def configureFossa() {
     writeFile file: '.fossa.yml', text: """
 version: 3
 server: https://app.fossa.com
-apiKey: ${FOSSA_API_KEY}
+apiKey: ${env.FOSSA_API_KEY}
 
 project:
   name: "${env.JOB_NAME}"
@@ -1958,23 +1957,11 @@ def runFossaAnalysis() {
     echo "🔍 Running FOSSA dependency analysis..."
     
     sh """
-        mkdir -p security-reports/fossa/
-        fossa analyze --config .fossa.yml --debug 2>&1 | tee security-reports/fossa/analysis.log
+        mkdir -p ${env.SECURITY_REPORTS_DIR ?: 'security-reports'}/fossa/
+        fossa analyze --config .fossa.yml --debug 2>&1 | tee ${env.SECURITY_REPORTS_DIR ?: 'security-reports'}/fossa/analysis.log
     """
     
     echo "✅ FOSSA analysis completed"
-    
-    // Run test but don't fail the build
-    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-        echo "🧪 Running FOSSA policy tests..."
-        sh """
-            fossa test --config .fossa.yml --timeout 600 --format json --debug 2>&1 | tee security-reports/fossa/test-results.json
-        """
-        echo "✅ FOSSA policy tests completed - no issues found"
-    }
-    
-    // Always report the results
-    echo "📊 FOSSA scan completed - check security-reports/fossa/ for detailed results"
 }
 
 def runFossaTest() {
@@ -1987,7 +1974,7 @@ def runFossaTest() {
                 --timeout ${params.FOSSA_TEST_TIMEOUT ?: '600'} \\
                 --format json \\
                 ${params.FOSSA_TEST_ARGS ?: ''} \\
-                > ${SECURITY_REPORTS_DIR}/fossa/test-results.json
+                > ${env.SECURITY_REPORTS_DIR ?: 'security-reports'}/fossa/test-results.json
         """
         echo "✅ FOSSA tests passed - no license violations found"
     }
@@ -1998,11 +1985,13 @@ def runFossaTest() {
 def publishFossaResults() {
     echo "📊 Publishing FOSSA results..."
     
+    def reportsDir = env.SECURITY_REPORTS_DIR ?: 'security-reports'
+    
     // Archive all FOSSA reports
-    archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/fossa/**/*", allowEmptyArchive: true
+    archiveArtifacts artifacts: "${reportsDir}/fossa/**/*", allowEmptyArchive: true
     
     // Parse and publish test results if available
-    if (fileExists("${SECURITY_REPORTS_DIR}/fossa/test-results.json")) {
+    if (fileExists("${reportsDir}/fossa/test-results.json")) {
         publishFossaTestResults()
     }
     
@@ -2013,7 +2002,8 @@ def publishFossaResults() {
 def publishFossaTestResults() {
     echo "📈 Publishing FOSSA test results..."
     
-    def testResultsFile = "${SECURITY_REPORTS_DIR}/fossa/test-results.json"
+    def reportsDir = env.SECURITY_REPORTS_DIR ?: 'security-reports'
+    def testResultsFile = "${reportsDir}/fossa/test-results.json"
     
     if (fileExists(testResultsFile)) {
         try {
@@ -2050,21 +2040,9 @@ FOSSA Scan Results:
 def generateFossaWarnings() {
     echo "⚠️ Generating FOSSA warnings for Jenkins..."
     
-    // Check if Python is available, fallback to shell if not
-    def pythonAvailable = sh(
-        script: "which python3 || echo 'not-found'",
-        returnStdout: true
-    ).trim()
+    def reportsDir = env.SECURITY_REPORTS_DIR ?: 'security-reports'
     
-    if (pythonAvailable == 'not-found') {
-        // Use shell-based approach if Python is not available
-        generateFossaWarningsShell()
-    } else {
-        generateFossaWarningsPython()
-    }
-}
-
-def generateFossaWarningsPython() {
+    // Use Python for warning generation - more robust than shell
     sh """
         python3 -c "
 import json
@@ -2075,7 +2053,7 @@ warnings_text = ''
 warnings_count = 0
 
 # Check for test results
-test_results_file = '${SECURITY_REPORTS_DIR}/fossa/test-results.json'
+test_results_file = '${reportsDir}/fossa/test-results.json'
 if os.path.exists(test_results_file):
     with open(test_results_file, 'r') as f:
         try:
@@ -2109,59 +2087,57 @@ if os.path.exists(test_results_file):
             warnings_count += 1
 
 # Create warnings directory if it doesn't exist
-os.makedirs('${SECURITY_REPORTS_DIR}', exist_ok=True)
+os.makedirs('${reportsDir}', exist_ok=True)
 
 # Write warnings file
-with open('${SECURITY_REPORTS_DIR}/fossa-warnings.txt', 'w') as f:
+with open('${reportsDir}/fossa-warnings.txt', 'w') as f:
     f.write(warnings_text)
 
 print(f'Generated {warnings_count} warnings')
-"
-    """
+" || {
+    echo "Python failed, falling back to shell-based warning generation..."
     
-    publishWarnings()
-}
-
-def generateFossaWarningsShell() {
-    sh """
-        # Shell-based warning generation as fallback
-        WARNINGS_FILE="${SECURITY_REPORTS_DIR}/fossa-warnings.txt"
-        TEST_RESULTS_FILE="${SECURITY_REPORTS_DIR}/fossa/test-results.json"
+    # Shell-based warning generation as fallback
+    WARNINGS_FILE="${reportsDir}/fossa-warnings.txt"
+    TEST_RESULTS_FILE="${reportsDir}/fossa/test-results.json"
+    
+    mkdir -p ${reportsDir}
+    
+    # Clear warnings file
+    > "\$WARNINGS_FILE"
+    
+    if [ -f "\$TEST_RESULTS_FILE" ]; then
+        echo "Processing FOSSA test results..."
         
-        mkdir -p ${SECURITY_REPORTS_DIR}
-        
-        # Clear warnings file
-        > "\$WARNINGS_FILE"
-        
-        if [ -f "\$TEST_RESULTS_FILE" ]; then
-            echo "Processing FOSSA test results..."
-            
-            # Simple grep-based extraction (basic fallback)
-            if grep -q '"license"' "\$TEST_RESULTS_FILE"; then
-                echo "WARNING: License issues found in FOSSA scan" >> "\$WARNINGS_FILE"
-            fi
-            
-            if grep -q '"vulnerability"' "\$TEST_RESULTS_FILE"; then
-                echo "WARNING: Vulnerability issues found in FOSSA scan" >> "\$WARNINGS_FILE"
-            fi
-            
-            # Count issues
-            LICENSE_COUNT=\$(grep -c '"license"' "\$TEST_RESULTS_FILE" || echo 0)
-            VULN_COUNT=\$(grep -c '"vulnerability"' "\$TEST_RESULTS_FILE" || echo 0)
-            
-            echo "Generated warnings for \$LICENSE_COUNT license issues and \$VULN_COUNT vulnerability issues"
-        else
-            echo "No FOSSA test results found"
+        # Simple grep-based extraction (basic fallback)
+        if grep -q '"license"' "\$TEST_RESULTS_FILE"; then
+            echo "WARNING: License issues found in FOSSA scan" >> "\$WARNINGS_FILE"
         fi
+        
+        if grep -q '"vulnerability"' "\$TEST_RESULTS_FILE"; then
+            echo "WARNING: Vulnerability issues found in FOSSA scan" >> "\$WARNINGS_FILE"
+        fi
+        
+        # Count issues
+        LICENSE_COUNT=\$(grep -c '"license"' "\$TEST_RESULTS_FILE" 2>/dev/null || echo 0)
+        VULN_COUNT=\$(grep -c '"vulnerability"' "\$TEST_RESULTS_FILE" 2>/dev/null || echo 0)
+        
+        echo "Generated warnings for \$LICENSE_COUNT license issues and \$VULN_COUNT vulnerability issues"
+    else
+        echo "No FOSSA test results found"
+    fi
+}
     """
     
     publishWarnings()
 }
 
 def publishWarnings() {
+    def reportsDir = env.SECURITY_REPORTS_DIR ?: 'security-reports'
+    
     // Publish warnings if any exist
-    if (fileExists("${SECURITY_REPORTS_DIR}/fossa-warnings.txt")) {
-        def warningsContent = readFile("${SECURITY_REPORTS_DIR}/fossa-warnings.txt")
+    if (fileExists("${reportsDir}/fossa-warnings.txt")) {
+        def warningsContent = readFile("${reportsDir}/fossa-warnings.txt")
         
         if (warningsContent.trim()) {
             try {
@@ -2170,7 +2146,7 @@ def publishWarnings() {
                     aggregatingResults: false,
                     tools: [
                         issues(
-                            pattern: "${SECURITY_REPORTS_DIR}/fossa-warnings.txt",
+                            pattern: "${reportsDir}/fossa-warnings.txt",
                             name: 'FOSSA Issues'
                         )
                     ],
