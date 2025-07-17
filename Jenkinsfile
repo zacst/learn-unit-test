@@ -610,133 +610,132 @@ pipeline {
             }
         }
 
-        stage('Security Analysis') {
+        stage('Dependency Vulnerability Scan') {
             when {
                 expression { params.ENABLE_SECURITY_SCAN }
             }
-            parallel {
-                stage('Dependency Vulnerability Scan') {
-                    steps {
-                        script {
-                            echo "🔒 Running OWASP Dependency Check..."
-                            
-                            try {
-                                // Setup directories
-                                sh "mkdir -p ${SECURITY_REPORTS_DIR}/dependency-check"
-                                
-                                // Download and setup OWASP Dependency Check
-                                downloadDependencyCheck()
-                                
-                                // Run the scan
-                                runDependencyCheck()
-                                
-                                // Process results
-                                processDependencyCheckResults()
-                                
-                            } catch (Exception e) {
-                                echo "❌ Dependency Check failed: ${e.getMessage()}"
-                                env.DEPENDENCY_VULNERABILITIES = "ERROR"
-                                env.DEPENDENCY_HIGH_CRITICAL = "ERROR"
-                                currentBuild.result = 'UNSTABLE'
-                            }
-                        }
+            steps {
+                script {
+                    echo "🔒 Running OWASP Dependency Check..."
+                    
+                    try {
+                        // Setup directories
+                        sh "mkdir -p ${SECURITY_REPORTS_DIR}/dependency-check"
+                        
+                        // Download and setup OWASP Dependency Check
+                        downloadDependencyCheck()
+                        
+                        // Run the scan
+                        runDependencyCheck()
+                        
+                        // Process results
+                        processDependencyCheckResults()
+                        
+                    } catch (Exception e) {
+                        echo "❌ Dependency Check failed: ${e.getMessage()}"
+                        env.DEPENDENCY_VULNERABILITIES = "ERROR"
+                        env.DEPENDENCY_HIGH_CRITICAL = "ERROR"
+                        currentBuild.result = 'UNSTABLE'
                     }
                 }
-                
-                stage('SAST Security Scan') {
-                    steps {
-                        script {
-                            echo "🔒 Running Semgrep SAST analysis..."
-                            
-                            try {
-                                sh "mkdir -p ${SECURITY_REPORTS_DIR}/semgrep"
-                                
-                                // Install and run Semgrep
-                                installSemgrep()
-                                runSemgrepScan()
-                                processSemgrepResults()
-                                
-                            } catch (Exception e) {
-                                echo "❌ Semgrep scan failed: ${e.getMessage()}"
-                                env.SEMGREP_ISSUES = "ERROR"
-                                env.SEMGREP_CRITICAL = "ERROR"
-                                currentBuild.result = 'UNSTABLE'
-                            }
-                        }
+            }
+        }
+        
+        stage('SAST Security Scan') {
+            when {
+                expression { params.ENABLE_SECURITY_SCAN }
+            }
+            steps {
+                script {
+                    echo "🔒 Running Semgrep SAST analysis..."
+                    
+                    try {
+                        sh "mkdir -p ${SECURITY_REPORTS_DIR}/semgrep"
+                        
+                        // Install and run Semgrep
+                        installSemgrep()
+                        runSemgrepScan()
+                        processSemgrepResults()
+                        
+                    } catch (Exception e) {
+                        echo "❌ Semgrep scan failed: ${e.getMessage()}"
+                        env.SEMGREP_ISSUES = "ERROR"
+                        env.SEMGREP_CRITICAL = "ERROR"
+                        currentBuild.result = 'UNSTABLE'
                     }
                 }
+            }
+        }
 
-                stage('Linting & Code Style') {
-                    when { expression { params.ENABLE_LINTING } }
-                    steps {
-                        script {
-                            runLinting()
-                        }
-                    }
+        stage('Linting & Code Style') {
+            when { expression { params.ENABLE_LINTING } }
+            steps {
+                script {
+                    runLinting()
                 }
+            }
+        }
 
-                stage('Secrets Detection') {
-                    when { expression { params.ENABLE_SECRETS_SCAN } }
-                    steps {
-                        script {
-                            runSecretsScan()
-                        }
+        stage('Secrets Detection') {
+            when { expression { params.ENABLE_SECRETS_SCAN } }
+            steps {
+                script {
+                    runSecretsScan()
+                }
+            }
+        }
+        
+        stage('Container Security Scan') {
+            when {
+                expression { 
+                    params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || 
+                    params.SECURITY_SCAN_LEVEL == 'FULL' 
+                }
+            }
+            steps {
+                script {
+                    echo "🔒 Running Trivy security scan..."
+                    
+                    try {
+                        sh "mkdir -p ${SECURITY_REPORTS_DIR}/trivy"
+                        installTrivy()
+                        runTrivyScan()
+                        
+                    } catch (Exception e) {
+                        echo "❌ Trivy scan failed: ${e.getMessage()}"
+                        echo "⚠️ Continuing without container security scan"
                     }
                 }
-                
-                stage('Container Security Scan') {
-                    when {
-                        expression { 
-                            params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || 
-                            params.SECURITY_SCAN_LEVEL == 'FULL' 
-                        }
-                    }
-                    steps {
-                        script {
-                            echo "🔒 Running Trivy security scan..."
-                            
-                            try {
-                                sh "mkdir -p ${SECURITY_REPORTS_DIR}/trivy"
-                                installTrivy()
-                                runTrivyScan()
-                                
-                            } catch (Exception e) {
-                                echo "❌ Trivy scan failed: ${e.getMessage()}"
-                                echo "⚠️ Continuing without container security scan"
-                            }
-                        }
-                    }
-                }
-                
-                stage('License Compliance Check') {
-                    when {
-                        expression { params.ENABLE_LICENSE_CHECK && (params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || params.SECURITY_SCAN_LEVEL == 'FULL') }
-                    }
-                    steps {
-                        script {
-                            try {
-                                runScanCodeLicenseCheck()
-                            } catch (Exception e) {
-                                echo "❌ License check failed: ${e.getMessage()}"
-                                if (params.FAIL_ON_SECURITY_ISSUES) {
-                                    error("Failing build due to non-compliant licenses.")
-                                } else {
-                                    currentBuild.result = 'UNSTABLE'
-                                }
-                            }
+            }
+        }
+        
+        stage('License Compliance Check') {
+            when {
+                expression { params.ENABLE_LICENSE_CHECK && (params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || params.SECURITY_SCAN_LEVEL == 'FULL') }
+            }
+            steps {
+                script {
+                    try {
+                        runScanCodeLicenseCheck()
+                    } catch (Exception e) {
+                        echo "❌ License check failed: ${e.getMessage()}"
+                        if (params.FAIL_ON_SECURITY_ISSUES) {
+                            error("Failing build due to non-compliant licenses.")
+                        } else {
+                            currentBuild.result = 'UNSTABLE'
                         }
                     }
                 }
             }
-            
-            post {
-                always {
-                    script {
-                        archiveSecurityReports()
-                        publishSecurityResults()
-                        generateSecuritySummary()
-                        evaluateSecurityGates()
-                    }
+        }
+    
+        post {
+            always {
+                script {
+                    archiveSecurityReports()
+                    publishSecurityResults()
+                    generateSecuritySummary()
+                    evaluateSecurityGates()
                 }
             }
         }
