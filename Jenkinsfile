@@ -1796,7 +1796,6 @@ def runFossaLicenseCheck() {
 def installFossaCli() {
     echo "🔧 Installing FOSSA CLI..."
     
-    // Check if FOSSA CLI is already installed
     def fossaInstalled = sh(
         script: "which fossa || echo 'not-found'",
         returnStdout: true
@@ -1809,21 +1808,30 @@ def installFossaCli() {
             # Create local bin directory
             mkdir -p \${HOME}/bin
             
-            # Get the latest release version and download URL
-            echo "Getting latest FOSSA CLI release..."
-            LATEST_VERSION=\$(curl -s https://api.github.com/repos/fossas/fossa-cli/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
-            echo "Latest version: \$LATEST_VERSION"
+            # Use a specific known version instead of latest
+            FOSSA_VERSION="v3.9.7"  # Use a known stable version
             
-            # Download with explicit version (more reliable)
-            DOWNLOAD_URL="https://github.com/fossas/fossa-cli/releases/download/\$LATEST_VERSION/fossa_\${LATEST_VERSION}_linux_amd64.tar.gz"
+            # Direct download URL
+            DOWNLOAD_URL="https://github.com/fossas/fossa-cli/releases/download/\$FOSSA_VERSION/fossa_\${FOSSA_VERSION}_linux_amd64.tar.gz"
             echo "Downloading from: \$DOWNLOAD_URL"
             
-            # Download and extract
-            curl -L "\$DOWNLOAD_URL" -o /tmp/fossa.tar.gz
+            # Download with better error handling
+            if ! curl -L --fail --silent --show-error "\$DOWNLOAD_URL" -o /tmp/fossa.tar.gz; then
+                echo "❌ Download failed"
+                exit 1
+            fi
             
-            # Verify download
+            # Verify download and file type
             if [ ! -f /tmp/fossa.tar.gz ] || [ ! -s /tmp/fossa.tar.gz ]; then
                 echo "❌ Download failed or file is empty"
+                exit 1
+            fi
+            
+            # Check if it's actually a gzip file
+            if ! file /tmp/fossa.tar.gz | grep -q "gzip"; then
+                echo "❌ Downloaded file is not a gzip archive:"
+                file /tmp/fossa.tar.gz
+                head -20 /tmp/fossa.tar.gz
                 exit 1
             fi
             
@@ -1847,7 +1855,6 @@ def installFossaCli() {
             \${HOME}/bin/fossa --version
         """
         
-        // Update PATH for subsequent steps
         env.PATH = "${env.HOME}/bin:${env.PATH}"
         
     } else {
