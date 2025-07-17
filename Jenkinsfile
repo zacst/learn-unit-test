@@ -1803,59 +1803,32 @@ def installFossaCli() {
     
     if (fossaInstalled == 'not-found') {
         sh """
-            echo "Installing FOSSA CLI to local directory..."
+            echo "Installing FOSSA CLI using official installer..."
             
             # Create local bin directory
             mkdir -p \${HOME}/bin
             
-            # Use a specific known version instead of latest
-            FOSSA_VERSION="v3.9.7"  # Use a known stable version
+            # Use the official install script
+            curl -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/fossas/fossa-cli/master/install.sh | bash
             
-            # Direct download URL
-            DOWNLOAD_URL="https://github.com/fossas/fossa-cli/releases/download/\$FOSSA_VERSION/fossa_\${FOSSA_VERSION}_linux_amd64.tar.gz"
-            echo "Downloading from: \$DOWNLOAD_URL"
-            
-            # Download with better error handling
-            if ! curl -L --fail --silent --show-error "\$DOWNLOAD_URL" -o /tmp/fossa.tar.gz; then
-                echo "❌ Download failed"
-                exit 1
+            # The official installer typically installs to /usr/local/bin or similar
+            # Check common locations and create symlink if needed
+            if [ -f /usr/local/bin/fossa ]; then
+                ln -sf /usr/local/bin/fossa \${HOME}/bin/fossa
+            elif [ -f /tmp/fossa ]; then
+                mv /tmp/fossa \${HOME}/bin/fossa
+                chmod +x \${HOME}/bin/fossa
             fi
-            
-            # Verify download and file type
-            if [ ! -f /tmp/fossa.tar.gz ] || [ ! -s /tmp/fossa.tar.gz ]; then
-                echo "❌ Download failed or file is empty"
-                exit 1
-            fi
-            
-            # Check if it's actually a gzip file
-            if ! file /tmp/fossa.tar.gz | grep -q "gzip"; then
-                echo "❌ Downloaded file is not a gzip archive:"
-                file /tmp/fossa.tar.gz
-                head -20 /tmp/fossa.tar.gz
-                exit 1
-            fi
-            
-            # Extract
-            tar -xzf /tmp/fossa.tar.gz -C /tmp/
-            
-            # Move binary to bin directory
-            mv /tmp/fossa \${HOME}/bin/fossa
-            
-            # Make executable
-            chmod +x \${HOME}/bin/fossa
-            
-            # Clean up
-            rm -f /tmp/fossa.tar.gz
             
             # Add to PATH for this session
-            export PATH=\${HOME}/bin:\$PATH
+            export PATH=\${HOME}/bin:/usr/local/bin:\$PATH
             
             # Verify installation
             echo "Verifying FOSSA CLI installation..."
-            \${HOME}/bin/fossa --version
+            fossa --version
         """
         
-        env.PATH = "${env.HOME}/bin:${env.PATH}"
+        env.PATH = "${env.HOME}/bin:/usr/local/bin:${env.PATH}"
         
     } else {
         echo "✅ FOSSA CLI already installed: ${fossaInstalled}"
