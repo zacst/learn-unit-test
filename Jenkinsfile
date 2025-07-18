@@ -47,6 +47,10 @@ pipeline {
 
         // DAST Configuration
         DAST_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/dast"
+
+        // This is a fake GitHub token for testing purposes
+        github_token = "ghp_1234567890abcdef1234567890abcdef1234"
+
     }
 
     options {
