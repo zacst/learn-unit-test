@@ -622,14 +622,11 @@ pipeline {
                         // Setup directories
                         sh "mkdir -p ${SECURITY_REPORTS_DIR}/dependency-check"
                         
-                        // Download and setup OWASP Dependency Check
+                        cleanupExistingDependencyCheck()
                         downloadDependencyCheck()
-                        
-                        // Run the scan
                         runDependencyCheck()
-                        
-                        // Process results
                         processDependencyCheckResults()
+                        publishDependencyCheckReports()
                         
                     } catch (Exception e) {
                         echo "❌ Dependency Check failed: ${e.getMessage()}"
@@ -1088,32 +1085,126 @@ pipeline {
     }
 }
 
-// Helper functions for better maintainability
-def downloadDependencyCheck() {
+// Helper function to clean up any existing dependency-check installations
+def cleanupExistingDependencyCheck() {
+    echo "🧹 Cleaning up existing dependency-check installations..."
     sh """
-        if [ ! -f "dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip" ]; then
-            echo "📥 Downloading OWASP Dependency Check..."
-            curl -L -o dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip \\
-                "https://github.com/jeremylong/DependencyCheck/releases/download/v${DEPENDENCY_CHECK_VERSION}/dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip"
-            unzip -q dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip
-        fi
+        # Remove any existing dependency-check directories
+        find . -maxdepth 1 -name "dependency-check*" -type d -exec rm -rf {} + 2>/dev/null || true
+        
+        # Remove any zip files
+        find . -maxdepth 1 -name "dependency-check*.zip" -type f -delete 2>/dev/null || true
+        
+        # List what's left to verify cleanup
+        echo "📋 Remaining files after cleanup:"
+        ls -la | grep -i dependency || echo "   No dependency-check files found"
+        
+        echo "✅ Cleanup completed"
     """
 }
 
+// Helper function to download and setup specific version
+def downloadDependencyCheck() {
+    echo "📥 Setting up OWASP Dependency Check version ${DEPENDENCY_CHECK_VERSION}..."
+    sh """
+        # Set the target directory name
+        TARGET_DIR="dependency-check"
+        ZIP_FILE="dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip"
+        
+        # Check if we already have the correct version
+        if [ -d "\$TARGET_DIR" ] && [ -f "\$TARGET_DIR/bin/dependency-check.sh" ]; then
+            # Check version
+            CURRENT_VERSION=\$(\$TARGET_DIR/bin/dependency-check.sh --version 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || echo "unknown")
+            if [ "\$CURRENT_VERSION" = "${DEPENDENCY_CHECK_VERSION}" ]; then
+                echo "✅ Correct version ${DEPENDENCY_CHECK_VERSION} already installed"
+                exit 0
+            else
+                echo "⚠️ Different version found (\$CURRENT_VERSION), reinstalling..."
+                rm -rf "\$TARGET_DIR"
+            fi
+        fi
+        
+        # Download if not exists
+        if [ ! -f "\$ZIP_FILE" ]; then
+            echo "📥 Downloading OWASP Dependency Check version ${DEPENDENCY_CHECK_VERSION}..."
+            curl -L -o "\$ZIP_FILE" \\
+                "https://github.com/jeremylong/DependencyCheck/releases/download/v${DEPENDENCY_CHECK_VERSION}/dependency-check-${DEPENDENCY_CHECK_VERSION}-release.zip"
+            
+            if [ \$? -ne 0 ]; then
+                echo "❌ Failed to download dependency-check"
+                exit 1
+            fi
+        else
+            echo "📦 Using existing download"
+        fi
+        
+        # Extract
+        echo "📦 Extracting dependency-check..."
+        unzip -q "\$ZIP_FILE"
+        
+        # Rename to standard directory name
+        if [ -d "dependency-check-${DEPENDENCY_CHECK_VERSION}" ]; then
+            mv "dependency-check-${DEPENDENCY_CHECK_VERSION}" "\$TARGET_DIR"
+        fi
+        
+        # Make executable
+        chmod +x "\$TARGET_DIR/bin/dependency-check.sh"
+        
+        # Verify installation
+        if [ -f "\$TARGET_DIR/bin/dependency-check.sh" ]; then
+            echo "✅ Dependency-Check ${DEPENDENCY_CHECK_VERSION} installed successfully"
+            echo "🔍 Verifying installation..."
+            \$TARGET_DIR/bin/dependency-check.sh --version || echo "Version check failed but binary exists"
+        else
+            echo "❌ Installation failed - binary not found"
+            exit 1
+        fi
+        
+        # Clean up zip file
+        rm -f "\$ZIP_FILE"
+    """
+}
+
+// Main dependency check execution
 def runDependencyCheck() {
     withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY', optional: true)]) {
         sh """
             echo "🔍 Scanning for vulnerable dependencies..."
             
-            # Use NVD API Key if available
+            # Verify dependency-check is available
+            if [ ! -f "./dependency-check/bin/dependency-check.sh" ]; then
+                echo "❌ dependency-check.sh not found!"
+                exit 1
+            fi
+            
+            # Create output directory
+            mkdir -p ${SECURITY_REPORTS_DIR}/dependency-check
+            
+            # Check if NVD API Key option is supported
             NVD_ARGS=""
             if [ -n "\$NVD_API_KEY" ]; then
-                echo "Using NVD API Key for dependency check."
-                NVD_ARGS="--nvdApiKey \$NVD_API_KEY"
+                echo "🔑 NVD API Key found, checking if supported..."
+                if ./dependency-check/bin/dependency-check.sh --help | grep -q "nvdApiKey" 2>/dev/null; then
+                    NVD_ARGS="--nvdApiKey \$NVD_API_KEY"
+                    echo "✅ Using NVD API Key for faster scanning"
+                else
+                    echo "⚠️ NVD API Key option not supported in this version"
+                fi
             else
                 echo "⚠️ NVD API Key not found. Dependency-Check may be slow or fail."
             fi
+            
+            # Check if suppression file exists
+            SUPPRESSION_ARGS=""
+            if [ -f "dependency-check-suppressions.xml" ]; then
+                SUPPRESSION_ARGS="--suppression dependency-check-suppressions.xml"
+                echo "📋 Using suppression file: dependency-check-suppressions.xml"
+            else
+                echo "📋 No suppression file found, proceeding without suppressions"
+            fi
 
+            # Run dependency check
+            echo "🚀 Starting dependency scan..."
             ./dependency-check/bin/dependency-check.sh \\
                 --scan . \\
                 --format JSON \\
@@ -1131,16 +1222,19 @@ def runDependencyCheck() {
                 --exclude "**/obj/**" \\
                 --exclude "**/packages/**" \\
                 --exclude "**/node_modules/**" \\
-                --suppression dependency-check-suppressions.xml \\
+                \$SUPPRESSION_ARGS \\
                 \$NVD_ARGS || true
             
-            # Create summary report
-            echo "📋 Creating dependency check summary..."
+            # Verify report generation
+            echo "📋 Verifying report generation..."
             if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json" ]; then
                 echo "✅ Dependency check report generated successfully"
+                echo "📊 Generated reports:"
                 ls -la ${SECURITY_REPORTS_DIR}/dependency-check/
             else
                 echo "❌ Failed to generate dependency check report"
+                echo "📋 Directory contents:"
+                ls -la ${SECURITY_REPORTS_DIR}/dependency-check/ || echo "Directory doesn't exist"
                 exit 1
             fi
         """
@@ -1148,6 +1242,8 @@ def runDependencyCheck() {
 }
 
 def processDependencyCheckResults() {
+    echo "🔍 Processing dependency check results..."
+    
     // Initialize default values
     env.DEPENDENCY_VULNERABILITIES = "0"
     env.DEPENDENCY_HIGH_CRITICAL = "0"
