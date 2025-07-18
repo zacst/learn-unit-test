@@ -1134,7 +1134,15 @@ def runDependencyCheck() {
                 --suppression dependency-check-suppressions.xml \\
                 \$NVD_ARGS || true
             
-            # ... (rest of the script remains the same)
+            # Create summary report
+            echo "📋 Creating dependency check summary..."
+            if [ -f "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.json" ]; then
+                echo "✅ Dependency check report generated successfully"
+                ls -la ${SECURITY_REPORTS_DIR}/dependency-check/
+            else
+                echo "❌ Failed to generate dependency check report"
+                exit 1
+            fi
         """
     }
 }
@@ -1212,6 +1220,61 @@ def processDependencyCheckResults() {
         env.DEPENDENCY_VULNERABILITIES = "UNKNOWN"
         env.DEPENDENCY_HIGH_CRITICAL = "UNKNOWN"
     }
+}
+
+def publishDependencyCheckReports() {
+    echo "📤 Publishing dependency check reports..."
+    
+    // Publish HTML report
+    if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-report.html")) {
+        publishHTML([
+            allowMissing: false,
+            alwaysLinkToLastBuild: true,
+            keepAll: true,
+            reportDir: "${SECURITY_REPORTS_DIR}/dependency-check",
+            reportFiles: 'dependency-check-report.html',
+            reportName: 'Dependency Check Report',
+            reportTitles: 'OWASP Dependency Check Security Report'
+        ])
+        echo "✅ HTML report published successfully"
+    } else {
+        echo "⚠️ HTML report not found, skipping HTML publishing"
+    }
+    
+    // Publish JUnit XML results (for test trends)
+    if (fileExists("${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-junit.xml")) {
+        publishTestResults testResultsPattern: "${SECURITY_REPORTS_DIR}/dependency-check/dependency-check-junit.xml",
+                          allowEmptyResults: true,
+                          testResultsProcessorType: 'junit'
+        echo "✅ JUnit XML results published successfully"
+    } else {
+        echo "⚠️ JUnit XML report not found, skipping JUnit publishing"
+    }
+    
+    // Archive all reports
+    archiveArtifacts artifacts: "${SECURITY_REPORTS_DIR}/dependency-check/*", 
+                    allowEmptyArchive: true,
+                    fingerprint: true
+    echo "✅ All dependency check reports archived"
+    
+    // Add build description with summary
+    if (env.DEPENDENCY_VULNERABILITIES != "ERROR" && env.DEPENDENCY_VULNERABILITIES != "UNKNOWN") {
+        def buildDescription = "🛡️ Dependencies: ${env.DEPENDENCIES_SCANNED} scanned, ${env.DEPENDENCY_VULNERABILITIES} vulnerabilities (${env.DEPENDENCY_HIGH_CRITICAL} high/critical)"
+        
+        if (currentBuild.description) {
+            currentBuild.description += "<br/>" + buildDescription
+        } else {
+            currentBuild.description = buildDescription
+        }
+        
+        // Set build result based on vulnerabilities
+        if (env.DEPENDENCY_HIGH_CRITICAL != "0") {
+            currentBuild.result = 'UNSTABLE'
+            echo "⚠️ Build marked as UNSTABLE due to high/critical vulnerabilities"
+        }
+    }
+    
+    echo "📊 Dependency check reports published to Jenkins menu"
 }
 
 def installSemgrep() {
