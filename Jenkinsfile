@@ -1264,6 +1264,36 @@ Status: ${currentBuild.result ?: 'SUCCESS'}
     writeFile file: "${SECURITY_REPORTS_DIR}/security-summary.txt", text: securitySummary
 }
 
+def publishSecurityResults() {
+    echo "📋 Publishing security results..."
+    
+    try {
+        // Publish Semgrep SARIF results
+        if (fileExists("${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif")) {
+            recordIssues enabledForFailure: true,
+                       tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/semgrep/semgrep-results.sarif", id: 'semgrep')],
+                       name: 'SAST (Semgrep)',
+                       id: 'semgrep',
+                       qualityGates: [[threshold: 1, type: 'TOTAL_ERROR', unstable: true]]
+        }
+        
+        // Publish Trivy SARIF results
+        if (fileExists("${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif")) {
+            recordIssues enabledForFailure: true,
+                       tools: [sarif(pattern: "${SECURITY_REPORTS_DIR}/trivy/trivy-fs-results.sarif", id: 'trivy')],
+                          name: 'Security (Trivy)',
+                          id: 'trivy',
+                       qualityGates: [[threshold: 5, type: 'TOTAL_HIGH', unstable: true]]
+        }
+        
+        echo "✅ Security results published to Jenkins UI"
+        
+    } catch (Exception e) {
+        echo "⚠️ Could not publish security results: ${e.getMessage()}"
+        e.printStackTrace()
+    }
+}
+
 def evaluateSecurityGates() {
     echo "🚧 Evaluating security gates..."
     
