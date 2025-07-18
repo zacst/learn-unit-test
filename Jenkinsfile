@@ -2462,8 +2462,6 @@ def runScanCodeLicenseCheck() {
 *.accdb
 IGNORE_EOF
         
-Z
-        
         # Verify essential output files were created
         if [ ! -f license-results.json ]; then
             echo "❌ ERROR: license-results.json not created"
