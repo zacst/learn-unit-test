@@ -2501,6 +2501,7 @@ IGNORE_EOF
         --json license-results.json \\
         --html license-report.html \\
         --strip-root \\
+        --verbose \\
         --max-in-memory 50 \\
         --license-score 70 \\
         . || {
