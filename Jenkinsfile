@@ -2413,42 +2413,56 @@ def runScanCodeLicenseCheck() {
 *reports/*
 *.min.js
 *.min.css
+
+# More dependency managers
+*bower_components/*
+*jspm_packages/*
+*packages/*
+*.nuget/*
+*node_modules.nosync/*
+
+# More build/generated content
+*cmake-build-*/*
+*.gradle/*
+*bazel-*/*
+*_build/*
+*generated/*
+*gen/*
+*.generated.*
+
+# Documentation that might be large
+*docs/_build/*
+*site-packages/*
+*htmlcov/*
+
+# More binary/media files
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.svg
+*.mp4
+*.mp3
+*.wav
+*.avi
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db3
+*.mdb
+*.accdb
 IGNORE_EOF
         
-        # Calculate optimal process count (but cap at 4 to avoid resource exhaustion)
-        PROCESSES=$(nproc 2>/dev/null || echo "2")
-        if [ "$PROCESSES" -gt 4 ]; then
-            PROCESSES=4
-        fi
-        echo "Using $PROCESSES processes for scanning..."
-        
-        # Run ScanCode with optimized settings
-        timeout 1800 scancode \\
-            --license \\
-            --copyright \\
-            --processes $PROCESSES \\
-            --timeout 900 \\
-            --ignore .scancode-ignore \\
-            --json license-results.json \\
-            --html license-report.html \\
-            --strip-root \\
-            --license-text \\
-            --license-text-diagnostics \\
-            --max-in-memory 0 \\
-            . || {
-            EXIT_CODE=$?
-            echo "ScanCode exit code: $EXIT_CODE"
-            
-            # Handle different exit scenarios
-            if [ $EXIT_CODE -eq 124 ]; then
-                echo "⚠️  ScanCode timed out after 30 minutes"
-            elif [ $EXIT_CODE -ne 0 ] && [ -f license-results.json ]; then
-                echo "⚠️  ScanCode completed with warnings but produced results"
-            elif [ $EXIT_CODE -ne 0 ]; then
-                echo "❌ ScanCode failed completely"
-                exit 1
-            fi
-        }
+Z
         
         # Verify essential output files were created
         if [ ! -f license-results.json ]; then
