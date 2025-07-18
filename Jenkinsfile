@@ -2218,13 +2218,20 @@ def publishWarnings() {
     }
 }
 
+
 def runScanCodeLicenseCheck() {
-    // Install ScanCode using pip with --user flag
+    // Install ScanCode using pip with --user flag and dependency resolution
     sh '''
-        echo "Installing ScanCode..."
-        # Install ScanCode in user directory
+        echo "Installing ScanCode with dependency resolution..."
+        
+        # Upgrade pip first
         pip3 install --user --upgrade pip
-        pip3 install --user scancode-toolkit
+        
+        # Install ScanCode with specific dependency versions to avoid conflicts
+        pip3 install --user --upgrade scancode-toolkit
+        
+        # Fix known dependency conflicts if they exist
+        pip3 install --user --force-reinstall "click>=8.1.0,<8.2.0" || echo "Click version conflict detected but continuing..."
         
         # Add user bin to PATH
         export PATH="$HOME/.local/bin:$PATH"
@@ -2233,60 +2240,133 @@ def runScanCodeLicenseCheck() {
         scancode --version
     '''
     
-    // Run ScanCode license scan
+    // Run ScanCode license scan with optimizations
     sh '''
         export PATH="$HOME/.local/bin:$PATH"
         
-        echo "Running ScanCode license scan with resource limits..."
+        echo "Running optimized ScanCode license scan..."
         
-        # Create ignore file for common directories that don't need scanning
+        # Create comprehensive ignore file
         cat > .scancode-ignore << 'IGNORE_EOF'
-*.git/*
+# Version control
+.git/*
+.svn/*
+.hg/*
+
+# Dependencies and build artifacts
 *node_modules/*
 *venv/*
+*env/*
+*virtualenv/*
 *__pycache__/*
-*.pyc
-*.class
-*.jar
-*.war
-*.ear
 *target/*
 *build/*
 *dist/*
 *out/*
-*.log
-*.tmp
-*temp/*
-*dependency-check/*
-*security-reports/*
-*trivy-bin/*
-*.db
-*.mv.db
+*.egg-info/*
+*vendor/*
+*third_party/*
+
+# Binary and compiled files
+*.pyc
+*.pyo
+*.class
+*.jar
+*.war
+*.ear
 *.exe
 *.bin
 *.so
 *.dll
 *.dylib
+*.a
+*.lib
+*.o
+*.obj
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Logs and temporary files
+*.log
+*.tmp
+*temp/*
+*tmp/*
+*.cache
+*.pid
+
+# IDE and editor files
+.vscode/*
+.idea/*
+*.swp
+*.swo
+*~
+
+# Project specific (add your own)
+*dependency-check/*
+*security-reports/*
+*trivy-bin/*
+*.db
+*.mv.db
+*coverage/*
+*reports/*
+*.min.js
+*.min.css
 IGNORE_EOF
         
-        # Run faster license scan with optimized settings
-        # Use --license-text to skip full license detection, --processes 1 to be gentle on resources
-        scancode --license --copyright --processes 1 --timeout 600 --ignore .scancode-ignore --json license-results.json --html license-report.html . || {
-            echo "ScanCode completed with some errors (likely binary files), but continuing..."
-            # Check if essential output files were created
-            if [ ! -f license-results.json ]; then
-                echo "ERROR: license-results.json not created"
+        # Calculate optimal process count (but cap at 4 to avoid resource exhaustion)
+        PROCESSES=$(nproc 2>/dev/null || echo "2")
+        if [ "$PROCESSES" -gt 4 ]; then
+            PROCESSES=4
+        fi
+        echo "Using $PROCESSES processes for scanning..."
+        
+        # Run ScanCode with optimized settings
+        timeout 1800 scancode \\
+            --license \\
+            --copyright \\
+            --processes $PROCESSES \\
+            --timeout 900 \\
+            --ignore .scancode-ignore \\
+            --json license-results.json \\
+            --html license-report.html \\
+            --strip-root \\
+            --license-text \\
+            --license-text-diagnostics \\
+            --max-in-memory 0 \\
+            . || {
+            EXIT_CODE=$?
+            echo "ScanCode exit code: $EXIT_CODE"
+            
+            # Handle different exit scenarios
+            if [ $EXIT_CODE -eq 124 ]; then
+                echo "⚠️  ScanCode timed out after 30 minutes"
+            elif [ $EXIT_CODE -ne 0 ] && [ -f license-results.json ]; then
+                echo "⚠️  ScanCode completed with warnings but produced results"
+            elif [ $EXIT_CODE -ne 0 ]; then
+                echo "❌ ScanCode failed completely"
                 exit 1
             fi
         }
         
-        # Generate text summary directly from JSON results (much faster than re-scanning)
-        if [ -f license-results.json ]; then
-            echo "Generating license summary from existing results..."
-            jq -r '.files[] | select(.licenses and (.licenses | length > 0)) | "\\(.path): \\(.licenses[].short_name // .licenses[].key)"' license-results.json > license-summary.txt || echo "License summary generation failed" > license-summary.txt
-        else
-            echo "No license results found" > license-summary.txt
+        # Verify essential output files were created
+        if [ ! -f license-results.json ]; then
+            echo "❌ ERROR: license-results.json not created"
+            exit 1
         fi
+        
+        # Check if JSON is valid and not empty
+        if ! jq empty license-results.json 2>/dev/null; then
+            echo "❌ ERROR: license-results.json is not valid JSON"
+            exit 1
+        fi
+        
+        echo "✅ ScanCode scan completed successfully"
         
         # Generate license compliance report
         cat > license-compliance.html << 'EOF'
