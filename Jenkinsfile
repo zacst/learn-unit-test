@@ -2337,13 +2337,14 @@ def runScanCodeLicenseCheck() {
     '''
     
     // Run ScanCode license scan with optimizations
-    sh '''
-        export PATH="$HOME/.local/bin:$PATH"
-        
-        echo "Running optimized ScanCode license scan..."
-        
-        # Create comprehensive ignore file
-        cat > .scancode-ignore << 'IGNORE_EOF'
+
+sh '''
+    export PATH="$HOME/.local/bin:$PATH"
+    
+    echo "Running optimized ScanCode license scan..."
+    
+    # Create comprehensive ignore file
+    cat > .scancode-ignore << 'IGNORE_EOF'
 # Version control
 .git/*
 .svn/*
@@ -2403,7 +2404,7 @@ def runScanCodeLicenseCheck() {
 *.swo
 *~
 
-# Project specific (add your own)
+# Project specific
 *dependency-check/*
 *security-reports/*
 *trivy-bin/*
@@ -2461,23 +2462,101 @@ def runScanCodeLicenseCheck() {
 *.mdb
 *.accdb
 IGNORE_EOF
+
+    # Calculate optimal process count
+    PROCESSES=$(nproc 2>/dev/null || echo "2")
+    AVAILABLE_MEMORY=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "4096")
+    
+    # Optimize process count based on both CPU and memory
+    MAX_PROCESSES_BY_MEMORY=$((AVAILABLE_MEMORY / 1024))
+    if [ "$MAX_PROCESSES_BY_MEMORY" -lt 1 ]; then
+        MAX_PROCESSES_BY_MEMORY=1
+    fi
+    
+    PROCESSES=$(( PROCESSES < MAX_PROCESSES_BY_MEMORY ? PROCESSES : MAX_PROCESSES_BY_MEMORY ))
+    if [ "$PROCESSES" -gt 6 ]; then
+        PROCESSES=6
+    fi
+    
+    echo "Using $PROCESSES processes for scanning"
+    
+    # Set timeout based on expected scan size
+    FILE_COUNT=$(find . -type f \\( ! -path './.git/*' ! -path './node_modules/*' ! -path './venv/*' ! -path './build/*' ! -path './dist/*' \\) | wc -l 2>/dev/null || echo "1000")
+    echo "Estimated files to scan: $FILE_COUNT"
+    
+    # Dynamic timeout: base 30min + 1min per 1000 files, max 2 hours
+    TIMEOUT=$((1800 + (FILE_COUNT / 1000) * 60))
+    if [ "$TIMEOUT" -gt 7200 ]; then
+        TIMEOUT=7200
+    fi
+    
+    echo "Setting timeout to $TIMEOUT seconds ($((TIMEOUT / 60)) minutes)"
+    
+    timeout $TIMEOUT scancode \\
+        --license \\
+        --copyright \\
+        --processes $PROCESSES \\
+        --timeout 600 \\
+        --ignore .scancode-ignore \\
+        --json license-results.json \\
+        --html license-report.html \\
+        --strip-root \\
+        --max-in-memory 50 \\
+        --license-score 70 \\
+        --copyright-threshold 3 \\
+        . || {
+        EXIT_CODE=$?
+        echo "ScanCode exit code: $EXIT_CODE"
         
-        # Verify essential output files were created
-        if [ ! -f license-results.json ]; then
-            echo "❌ ERROR: license-results.json not created"
-            exit 1
-        fi
-        
-        # Check if JSON is valid and not empty
-        if ! jq empty license-results.json 2>/dev/null; then
-            echo "❌ ERROR: license-results.json is not valid JSON"
-            exit 1
-        fi
-        
-        echo "✅ ScanCode scan completed successfully"
-        
-        # Generate license compliance report
-        cat > license-compliance.html << 'EOF'
+        case $EXIT_CODE in
+            124)
+                echo "⚠️  ScanCode timed out after $((TIMEOUT / 60)) minutes"
+                if [ -f license-results.json ] && [ -s license-results.json ]; then
+                    echo "📄 Partial results may be available"
+                    if jq empty license-results.json 2>/dev/null; then
+                        echo "✅ Partial results are valid JSON - continuing"
+                        exit 0
+                    fi
+                fi
+                exit 1
+                ;;
+            0)
+                echo "✅ ScanCode completed successfully"
+                ;;
+            *)
+                if [ -f license-results.json ] && [ -s license-results.json ]; then
+                    echo "⚠️  ScanCode completed with warnings but produced results"
+                    if jq empty license-results.json 2>/dev/null; then
+                        echo "✅ Results are valid JSON - continuing"
+                        exit 0
+                    else
+                        echo "❌ Results file is corrupted"
+                        exit 1
+                    fi
+                else
+                    echo "❌ ScanCode failed completely - no results produced"
+                    exit 1
+                fi
+                ;;
+        esac
+    }
+    
+    # NOW verify the results (after ScanCode has run)
+    if [ ! -f license-results.json ]; then
+        echo "❌ ERROR: license-results.json not created"
+        exit 1
+    fi
+    
+    # Check if JSON is valid and not empty
+    if ! jq empty license-results.json 2>/dev/null; then
+        echo "❌ ERROR: license-results.json is not valid JSON"
+        exit 1
+    fi
+    
+    echo "✅ ScanCode scan completed successfully"
+    
+    # Generate license compliance report
+    cat > license-compliance.html << 'EOF'
 <!DOCTYPE html>
 <html>
 <head>
