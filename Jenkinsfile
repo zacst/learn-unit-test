@@ -2194,6 +2194,16 @@ def runScanCodeLicenseCheck() {
 *.log
 *.tmp
 *temp/*
+*dependency-check/*
+*security-reports/*
+*trivy-bin/*
+*.db
+*.mv.db
+*.exe
+*.bin
+*.so
+*.dll
+*.dylib
 IGNORE_EOF
         
         # Run comprehensive license scan with reduced resource usage
