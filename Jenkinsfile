@@ -2503,7 +2503,6 @@ IGNORE_EOF
         --strip-root \\
         --max-in-memory 50 \\
         --license-score 70 \\
-        --copyright-threshold 3 \\
         . || {
         EXIT_CODE=$?
         echo "ScanCode exit code: $EXIT_CODE"
