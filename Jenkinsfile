@@ -417,7 +417,7 @@ pipeline {
                                     /d:sonar.login="$SONAR_TOKEN" \
                                     /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \
                                     /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \
-                                    /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**"
+                                    /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \
                                     /d:sonar.test.exclusions="**/*.Tests/**" \
                                     /d:sonar.coverage.exclusions="**/*.Tests/**"
                             '''
