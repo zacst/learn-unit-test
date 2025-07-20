@@ -18,7 +18,7 @@ pipeline {
 
         // SonarQube Configuration
         SONARQUBE_URL = 'http://localhost:9000'
-        SONAR_PROJECT_KEY = 'your-project-key' // Replace with your actual SonarQube project key
+        SONAR_PROJECT_KEY = 'calculator' // Replace with your actual SonarQube project key
 
         // JFrog Configuration
         JFROG_CLI_BUILD_NAME = "${JOB_NAME}"
@@ -417,7 +417,7 @@ pipeline {
                                     /d:sonar.login="$SONAR_TOKEN" \
                                     /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \
                                     /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \
-                                    /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**" \
+                                    /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**"
                                     /d:sonar.test.exclusions="**/*.Tests/**" \
                                     /d:sonar.coverage.exclusions="**/*.Tests/**"
                             '''
@@ -471,6 +471,7 @@ pipeline {
                                                     --logger "trx;LogFileName=nunit-results-${projectName}.trx" \\
                                                     --results-directory ${TEST_RESULTS_DIR} \\
                                                     ${coverageArg} \\
+                                                    -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura \\
                                                     --verbosity ${dotnetVerbosity}
                                             """
                                         }
