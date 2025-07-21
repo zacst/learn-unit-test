@@ -54,9 +54,6 @@ pipeline {
         GITLEAKS_VERSION = '8.18.2'
         LICENSE_CHECKER_VERSION = '3.0.0'
 
-        // --- FOSSA Configuration ---
-        FOSSA_API_KEY = credentials('fossa-api-key')
-
         // --- Test Token ---
         // This is a fake GitHub token for testing purposes
         GITHUB_TOKEN = "ghp_1234567890abcdef1234567890abcdef1234"
@@ -388,6 +385,7 @@ def startSonarScanner(String sonarToken) {
     echo "🔍 Starting SonarQube analysis..."
     sh """
         export PATH="\$PATH:\$HOME/.dotnet/tools"
+        export SONAR_TOKEN="${sonarToken}"
         dotnet sonarscanner begin \\
             /k:"\$SONAR_PROJECT_KEY" \\
             /d:sonar.host.url="\$SONARQUBE_URL" \\
