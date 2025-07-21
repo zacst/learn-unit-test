@@ -742,220 +742,220 @@ pipeline {
             }
         }
 
-        // stage('Upload to JFrog Artifactory') {
-        //     steps {
-        //         script {
-        //             echo "📦 Uploading .NET artifacts to JFrog Artifactory..."
+        stage('Upload to JFrog Artifactory') {
+            steps {
+                script {
+                    echo "📦 Uploading .NET artifacts to JFrog Artifactory..."
                     
-        //             try {
-        //                 // Test connection to Artifactory
-        //                 jf 'rt ping'
-        //                 echo "✅ JFrog Artifactory connection successful"
+                    try {
+                        // Test connection to Artifactory
+                        jf 'rt ping'
+                        echo "✅ JFrog Artifactory connection successful"
                         
-        //                 // Debug: Show current directory and file structure
-        //                 echo "🔍 Current directory structure:"
-        //                 sh """
-        //                     echo "Working directory: \$(pwd)"
-        //                     echo "Contents of current directory:"
-        //                     ls -la
-        //                     echo "Looking for bin directories:"
-        //                     find . -type d -name 'bin' | head -10
-        //                     echo "Looking for .NET files in bin directories:"
-        //                     find . -type f -name '*.dll' -o -name '*.exe' | head -10
-        //                 """
+                        // Debug: Show current directory and file structure
+                        echo "🔍 Current directory structure:"
+                        sh """
+                            echo "Working directory: \$(pwd)"
+                            echo "Contents of current directory:"
+                            ls -la
+                            echo "Looking for bin directories:"
+                            find . -type d -name 'bin' | head -10
+                            echo "Looking for .NET files in bin directories:"
+                            find . -type f -name '*.dll' -o -name '*.exe' | head -10
+                        """
                         
-        //                 // Find and list all potential artifacts with existence check
-        //                 def artifactsList = sh(
-        //                     script: """
-        //                         find . -type f \\( -name '*.dll' -o -name '*.exe' -o -name '*.pdb' \\) \\
-        //                             \\( -path '*/bin/Release/*' -o -path '*/bin/Debug/*' \\) | sort
-        //                     """,
-        //                     returnStdout: true
-        //                 ).trim()
+                        // Find and list all potential artifacts with existence check
+                        def artifactsList = sh(
+                            script: """
+                                find . -type f \\( -name '*.dll' -o -name '*.exe' -o -name '*.pdb' \\) \\
+                                    \\( -path '*/bin/Release/*' -o -path '*/bin/Debug/*' \\) | sort
+                            """,
+                            returnStdout: true
+                        ).trim()
                         
-        //                 echo "🔍 Searching for .NET artifacts completed"
+                        echo "🔍 Searching for .NET artifacts completed"
                         
-        //                 if (artifactsList) {
-        //                     echo "📋 Found potential artifacts:"
-        //                     echo "${artifactsList}"
+                        if (artifactsList) {
+                            echo "📋 Found potential artifacts:"
+                            echo "${artifactsList}"
                             
-        //                     def artifactFiles = artifactsList.split('\n').findAll { 
-        //                         it.trim() && !it.trim().isEmpty() && !it.contains('🔍') && !it.contains('Searching')
-        //                     }
+                            def artifactFiles = artifactsList.split('\n').findAll { 
+                                it.trim() && !it.trim().isEmpty() && !it.contains('🔍') && !it.contains('Searching')
+                            }
                             
-        //                     if (artifactFiles.size() > 0) {
-        //                         echo "📦 Processing ${artifactFiles.size()} artifact(s)..."
+                            if (artifactFiles.size() > 0) {
+                                echo "📦 Processing ${artifactFiles.size()} artifact(s)..."
                                 
-        //                         // Get current working directory for absolute paths
-        //                         def workingDir = sh(script: "pwd", returnStdout: true).trim()
-        //                         echo "📁 Working directory: ${workingDir}"
+                                // Get current working directory for absolute paths
+                                def workingDir = sh(script: "pwd", returnStdout: true).trim()
+                                echo "📁 Working directory: ${workingDir}"
                                 
-        //                         // Process each artifact file with existence verification
-        //                         artifactFiles.each { artifactPath ->
-        //                             artifactPath = artifactPath.trim()
+                                // Process each artifact file with existence verification
+                                artifactFiles.each { artifactPath ->
+                                    artifactPath = artifactPath.trim()
                                     
-        //                             // Verify file exists before attempting upload
-        //                             def fileExists = sh(
-        //                                 script: "test -f '${artifactPath}' && echo 'true' || echo 'false'",
-        //                                 returnStdout: true
-        //                             ).trim()
+                                    // Verify file exists before attempting upload
+                                    def fileExists = sh(
+                                        script: "test -f '${artifactPath}' && echo 'true' || echo 'false'",
+                                        returnStdout: true
+                                    ).trim()
                                     
-        //                             if (fileExists == 'true') {
-        //                                 // Get relative path for target structure
-        //                                 def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
+                                    if (fileExists == 'true') {
+                                        // Get relative path for target structure
+                                        def relativePath = artifactPath.startsWith('./') ? artifactPath.substring(2) : artifactPath
                                         
-        //                                 echo "📤 Processing file: ${relativePath}"
+                                        echo "📤 Processing file: ${relativePath}"
                                         
-        //                                 try {
-        //                                     // FIXED: Use proper jf rt u command syntax
-        //                                     jf "rt u \"${artifactPath}\" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
+                                        try {
+                                            // FIXED: Use proper jf rt u command syntax
+                                            jf "rt u \"${artifactPath}\" ${ARTIFACTORY_REPO_BINARIES}/${relativePath} --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
                                             
-        //                                     echo "✅ Successfully uploaded: ${relativePath}"
+                                            echo "✅ Successfully uploaded: ${relativePath}"
                                             
-        //                                 } catch (Exception uploadException) {
-        //                                     echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
+                                        } catch (Exception uploadException) {
+                                            echo "❌ Failed to upload ${relativePath}: ${uploadException.getMessage()}"
                                             
-        //                                     // Alternative approach: Upload with simpler syntax
-        //                                     try {
-        //                                         echo "🔄 Trying simplified upload..."
+                                            // Alternative approach: Upload with simpler syntax
+                                            try {
+                                                echo "🔄 Trying simplified upload..."
                                                 
-        //                                         // Create a temporary spec file for upload
-        //                                         def specContent = """
-        //                                         {
-        //                                             "files": [
-        //                                                 {
-        //                                                     "pattern": "${artifactPath}",
-        //                                                     "target": "${ARTIFACTORY_REPO_BINARIES}/${relativePath}"
-        //                                                 }
-        //                                             ]
-        //                                         }
-        //                                         """
+                                                // Create a temporary spec file for upload
+                                                def specContent = """
+                                                {
+                                                    "files": [
+                                                        {
+                                                            "pattern": "${artifactPath}",
+                                                            "target": "${ARTIFACTORY_REPO_BINARIES}/${relativePath}"
+                                                        }
+                                                    ]
+                                                }
+                                                """
                                                 
-        //                                         writeFile file: 'upload-spec.json', text: specContent
+                                                writeFile file: 'upload-spec.json', text: specContent
                                                 
-        //                                         jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
+                                                jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
                                                 
-        //                                         echo "✅ Successfully uploaded with spec file: ${relativePath}"
+                                                echo "✅ Successfully uploaded with spec file: ${relativePath}"
                                                 
-        //                                     } catch (Exception specException) {
-        //                                         echo "❌ Spec file approach also failed: ${specException.getMessage()}"
+                                            } catch (Exception specException) {
+                                                echo "❌ Spec file approach also failed: ${specException.getMessage()}"
                                                 
-        //                                         // Final fallback: Direct upload without build info
-        //                                         try {
-        //                                             echo "🔄 Trying direct upload..."
+                                                // Final fallback: Direct upload without build info
+                                                try {
+                                                    echo "🔄 Trying direct upload..."
                                                     
-        //                                             jf "rt u \"${artifactPath}\" ${ARTIFACTORY_REPO_BINARIES}/${relativePath}"
+                                                    jf "rt u \"${artifactPath}\" ${ARTIFACTORY_REPO_BINARIES}/${relativePath}"
                                                     
-        //                                             echo "✅ Successfully uploaded (direct): ${relativePath}"
+                                                    echo "✅ Successfully uploaded (direct): ${relativePath}"
                                                     
-        //                                         } catch (Exception directException) {
-        //                                             echo "❌ All upload approaches failed for: ${relativePath}"
-        //                                             echo "Error: ${directException.getMessage()}"
-        //                                         }
-        //                                     }
-        //                                 }
-        //                             } else {
-        //                                 echo "⚠️ File does not exist, skipping: ${artifactPath}"
-        //                             }
-        //                         }
+                                                } catch (Exception directException) {
+                                                    echo "❌ All upload approaches failed for: ${relativePath}"
+                                                    echo "Error: ${directException.getMessage()}"
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        echo "⚠️ File does not exist, skipping: ${artifactPath}"
+                                    }
+                                }
                                 
-        //                         // Upload NuGet packages if they exist
-        //                         def nugetPackages = sh(
-        //                             script: "find . -name '*.nupkg' -o -name '*.snupkg' | head -20",
-        //                             returnStdout: true
-        //                         ).trim()
+                                // Upload NuGet packages if they exist
+                                def nugetPackages = sh(
+                                    script: "find . -name '*.nupkg' -o -name '*.snupkg' | head -20",
+                                    returnStdout: true
+                                ).trim()
                                 
-        //                         if (nugetPackages) {
-        //                             echo "📦 Found NuGet packages, uploading..."
-        //                             nugetPackages.split('\n').findAll { it.trim() }.each { packagePath ->
-        //                                 def packageExists = sh(
-        //                                     script: "test -f '${packagePath}' && echo 'true' || echo 'false'",
-        //                                     returnStdout: true
-        //                                 ).trim()
+                                if (nugetPackages) {
+                                    echo "📦 Found NuGet packages, uploading..."
+                                    nugetPackages.split('\n').findAll { it.trim() }.each { packagePath ->
+                                        def packageExists = sh(
+                                            script: "test -f '${packagePath}' && echo 'true' || echo 'false'",
+                                            returnStdout: true
+                                        ).trim()
                                         
-        //                                 if (packageExists == 'true') {
-        //                                     echo "📤 Uploading NuGet package: ${packagePath}"
+                                        if (packageExists == 'true') {
+                                            echo "📤 Uploading NuGet package: ${packagePath}"
                                             
-        //                                     try {
-        //                                         jf "rt u \"${packagePath}\" ${ARTIFACTORY_REPO_NUGET}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=true"
-        //                                         echo "✅ Successfully uploaded NuGet package: ${packagePath}"
-        //                                     } catch (Exception nugetException) {
-        //                                         echo "❌ Failed to upload NuGet package ${packagePath}: ${nugetException.getMessage()}"
-        //                                     }
-        //                                 }
-        //                             }
-        //                         }
+                                            try {
+                                                jf "rt u \"${packagePath}\" ${ARTIFACTORY_REPO_NUGET}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=true"
+                                                echo "✅ Successfully uploaded NuGet package: ${packagePath}"
+                                            } catch (Exception nugetException) {
+                                                echo "❌ Failed to upload NuGet package ${packagePath}: ${nugetException.getMessage()}"
+                                            }
+                                        }
+                                    }
+                                }
                                 
-        //                         // Upload test results and coverage reports
-        //                         def testResultsPath = "${workingDir}/${TEST_RESULTS_DIR}"
-        //                         def testResultsExists = sh(
-        //                             script: "test -d '${testResultsPath}' && echo 'true' || echo 'false'",
-        //                             returnStdout: true
-        //                         ).trim()
+                                // Upload test results and coverage reports
+                                def testResultsPath = "${workingDir}/${TEST_RESULTS_DIR}"
+                                def testResultsExists = sh(
+                                    script: "test -d '${testResultsPath}' && echo 'true' || echo 'false'",
+                                    returnStdout: true
+                                ).trim()
                                 
-        //                         if (testResultsExists == 'true') {
-        //                             echo "📊 Uploading test results..."
-        //                             try {
-        //                                 jf "rt u \"${testResultsPath}/*\" ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
-        //                                 echo "✅ Test results uploaded successfully"
-        //                             } catch (Exception testException) {
-        //                                 echo "❌ Failed to upload test results: ${testException.getMessage()}"
-        //                             }
-        //                         }
+                                if (testResultsExists == 'true') {
+                                    echo "📊 Uploading test results..."
+                                    try {
+                                        jf "rt u \"${testResultsPath}/*\" ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
+                                        echo "✅ Test results uploaded successfully"
+                                    } catch (Exception testException) {
+                                        echo "❌ Failed to upload test results: ${testException.getMessage()}"
+                                    }
+                                }
                                 
-        //                         def coveragePath = "${workingDir}/${COVERAGE_REPORTS_DIR}"
-        //                         def coverageExists = sh(
-        //                             script: "test -d '${coveragePath}' && echo 'true' || echo 'false'",
-        //                             returnStdout: true
-        //                         ).trim()
+                                def coveragePath = "${workingDir}/${COVERAGE_REPORTS_DIR}"
+                                def coverageExists = sh(
+                                    script: "test -d '${coveragePath}' && echo 'true' || echo 'false'",
+                                    returnStdout: true
+                                ).trim()
                                 
-        //                         if (coverageExists == 'true') {
-        //                             echo "📊 Uploading coverage reports..."
-        //                             try {
-        //                                 jf "rt u \"${coveragePath}/**\" ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
-        //                                 echo "✅ Coverage reports uploaded successfully"
-        //                             } catch (Exception coverageException) {
-        //                                 echo "❌ Failed to upload coverage reports: ${coverageException.getMessage()}"
-        //                             }
-        //                         }
+                                if (coverageExists == 'true') {
+                                    echo "📊 Uploading coverage reports..."
+                                    try {
+                                        jf "rt u \"${coveragePath}/**\" ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=false"
+                                        echo "✅ Coverage reports uploaded successfully"
+                                    } catch (Exception coverageException) {
+                                        echo "❌ Failed to upload coverage reports: ${coverageException.getMessage()}"
+                                    }
+                                }
                                 
-        //                         // Publish build info
-        //                         try {
-        //                             jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
-        //                             echo "✅ Build info published successfully"
-        //                         } catch (Exception buildInfoException) {
-        //                             echo "❌ Failed to publish build info: ${buildInfoException.getMessage()}"
-        //                         }
+                                // Publish build info
+                                try {
+                                    jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
+                                    echo "✅ Build info published successfully"
+                                } catch (Exception buildInfoException) {
+                                    echo "❌ Failed to publish build info: ${buildInfoException.getMessage()}"
+                                }
                                 
-        //                     } else {
-        //                         echo "⚠️ No artifacts found to upload"
-        //                     }
-        //                 } else {
-        //                     echo "⚠️ No .NET artifacts found in bin/Release or bin/Debug directories"
-        //                     echo "🔍 Checking alternative locations..."
+                            } else {
+                                echo "⚠️ No artifacts found to upload"
+                            }
+                        } else {
+                            echo "⚠️ No .NET artifacts found in bin/Release or bin/Debug directories"
+                            echo "🔍 Checking alternative locations..."
                             
-        //                     // Check for artifacts in other common locations
-        //                     def alternativeArtifacts = sh(
-        //                         script: "find . -name '*.dll' -o -name '*.exe' | grep -v '/obj/' | head -10",
-        //                         returnStdout: true
-        //                     ).trim()
+                            // Check for artifacts in other common locations
+                            def alternativeArtifacts = sh(
+                                script: "find . -name '*.dll' -o -name '*.exe' | grep -v '/obj/' | head -10",
+                                returnStdout: true
+                            ).trim()
                             
-        //                     if (alternativeArtifacts) {
-        //                         echo "📋 Found artifacts in alternative locations:"
-        //                         echo "${alternativeArtifacts}"
-        //                     } else {
-        //                         echo "❌ No .NET artifacts found anywhere"
-        //                     }
-        //                 }
+                            if (alternativeArtifacts) {
+                                echo "📋 Found artifacts in alternative locations:"
+                                echo "${alternativeArtifacts}"
+                            } else {
+                                echo "❌ No .NET artifacts found anywhere"
+                            }
+                        }
                         
-        //             } catch (Exception e) {
-        //                 echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
-        //                 echo "📊 This is non-critical - marking as unstable"
-        //                 currentBuild.result = 'UNSTABLE'
-        //             }
-        //         }
-        //     }
-        // }
+                    } catch (Exception e) {
+                        echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
+                        echo "📊 This is non-critical - marking as unstable"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
 
         stage('Deployment') {
             steps {
@@ -965,67 +965,15 @@ pipeline {
             }
         }
 
-        //  // Dynamic Application Security Testing (DAST)
-        // stage('DAST Scan (OWASP ZAP)') {
-        //     when { expression { params.ENABLE_DAST_SCAN } }
-        //     steps {
-        //         script {
-        //             catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-        //                 echo "🔒 Running DAST Scan on ${params.STAGING_URL}"
-        //                 sh "mkdir -p ${DAST_REPORTS_DIR}"
-
-        //                 // Use the official OWASP ZAP Docker image to run a baseline scan
-        //                 // This scan is non-intrusive and ideal for CI/CD pipelines
-        //                 try {
-        //                     sh """
-        //                         docker pull owasp/zap2docker-stable
-        //                         docker run --rm -v \$(pwd):/zap/wrk/:rw --network=host owasp/zap2docker-stable zap-baseline.py \\
-        //                             -t ${params.STAGING_URL} \\
-        //                             -g gen.conf \\
-        //                             -r ${DAST_REPORTS_DIR}/dast-report.html \\
-        //                             -w ${DAST_REPORTS_DIR}/dast-report.md \\
-        //                             -x ${DAST_REPORTS_DIR}/dast-report.xml \\
-        //                             -J ${DAST_REPORTS_DIR}/dast-report.json || true 
-        //                     """
-        //                     // The '|| true' prevents the build from failing if ZAP finds issues.
-        //                     // We will check the results and decide the build status below.
-
-        //                 } catch (Exception e) {
-        //                     echo "❌ DAST scan execution failed: ${e.message}"
-        //                     currentBuild.result = 'UNSTABLE'
-        //                 }
-
-        //                 // Publish the HTML report to Jenkins UI for easy viewing
-        //                 publishHTML(target: [
-        //                     allowMissing: true,
-        //                     alwaysLinkToLastBuild: true,
-        //                     keepAll: true,
-        //                     reportDir: DAST_REPORTS_DIR,
-        //                     reportFiles: 'dast-report.html',
-        //                     reportName: '🛡️ DAST Report (OWASP ZAP)'
-        //                 ])
-
-        //                 // Check the JSON report for findings and mark build as unstable if any are found
-        //                 def jsonReport = readFile("${DAST_REPORTS_DIR}/dast-report.json")
-        //                 def zapResults = new groovy.json.JsonSlurper().parseText(jsonReport)
-        //                 def highAlerts = zapResults.site.alerts.findAll { it.risk == 'High' }.size()
-        //                 def mediumAlerts = zapResults.site.alerts.findAll { it.risk == 'Medium' }.size()
-        //                 def lowAlerts = zapResults.site.alerts.findAll { it.risk == 'Low' }.size()
-                        
-        //                 env.DAST_HIGH_ALERTS = highAlerts.toString()
-        //                 env.DAST_MEDIUM_ALERTS = mediumAlerts.toString()
-        //                 env.DAST_LOW_ALERTS = lowAlerts.toString()
-
-        //                 if (highAlerts > 0 || mediumAlerts > 0) {
-        //                     echo "⚠️ DAST scan found ${highAlerts} High and ${mediumAlerts} Medium risk alerts. Marking build as UNSTABLE."
-        //                     currentBuild.result = 'UNSTABLE'
-        //                 } else {
-        //                     echo "✅ DAST scan completed with no High or Medium risk alerts."
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
+         // Dynamic Application Security Testing (DAST)
+        stage('DAST Scan (OWASP ZAP)') {
+            when { expression { params.ENABLE_DAST_SCAN } }
+            steps {
+                script {
+                    echo "🚀 DAST (to be implemented)"
+                }
+            }
+        }
     }
 
     post {
@@ -1529,752 +1477,4 @@ def runSecretsScan() {
         currentBuild.result = 'UNSTABLE'
         echo "❌ Gitleaks scan failed to execute: ${e.getMessage()}"
     }
-}
-
-def runFossaLicenseCheck() {
-    echo "⚖️ Running FOSSA License Compliance Check..."
-    
-    try {
-        // Install FOSSA CLI if not already installed
-        installFossaCli()
-        
-        // Configure FOSSA settings
-        configureFossa()
-        
-        // Run dependency analysis
-        runFossaAnalysis()
-        
-        // Test for license and vulnerability issues
-        runFossaTest()
-        
-        echo "✅ FOSSA license compliance check completed successfully."
-        
-    } catch (Exception e) {
-        echo "❌ FOSSA license check failed: ${e.getMessage()}"
-        if (params.FAIL_ON_SECURITY_ISSUES) {
-            error("Failing build due to FOSSA license compliance issues.")
-        } else {
-            currentBuild.result = 'UNSTABLE'
-        }
-    } finally {
-        // Always publish results
-        publishFossaResults()
-    }
-}
-
-def installFossaCli() {
-    echo "🔧 Installing FOSSA CLI..."
-    
-    def fossaInstalled = sh(
-        script: "which fossa || echo 'not-found'",
-        returnStdout: true
-    ).trim()
-    
-    if (fossaInstalled == 'not-found') {
-        sh """
-            echo "Installing FOSSA CLI v3 to local directory..."
-            
-            # Create local bin directory
-            mkdir -p \${HOME}/bin
-            
-            # Manual installation without any external scripts
-            echo "Getting latest FOSSA CLI v3 release..."
-            LATEST_RELEASE=\$(curl -s https://api.github.com/repos/fossas/fossa-cli/releases/latest)
-            VERSION=\$(echo "\$LATEST_RELEASE" | grep '"tag_name"' | head -n1 | cut -d'"' -f4)
-            
-            if [ -z "\$VERSION" ]; then
-                echo "❌ Could not get latest version from GitHub API"
-                exit 1
-            fi
-            
-            echo "Latest version: \$VERSION"
-            
-            # Extract all download URLs for this version
-            echo "Available download URLs:"
-            echo "\$LATEST_RELEASE" | grep '"browser_download_url"' | cut -d'"' -f4
-            
-            # Try to find the Linux AMD64 download URL
-            DOWNLOAD_URL=\$(echo "\$LATEST_RELEASE" | grep '"browser_download_url"' | grep 'linux_amd64' | head -n1 | cut -d'"' -f4)
-            
-            if [ -z "\$DOWNLOAD_URL" ]; then
-                # Try alternative patterns
-                DOWNLOAD_URL=\$(echo "\$LATEST_RELEASE" | grep '"browser_download_url"' | grep -i 'linux' | grep -i 'amd64\\|x86_64' | head -n1 | cut -d'"' -f4)
-            fi
-            
-            if [ -z "\$DOWNLOAD_URL" ]; then
-                echo "❌ Could not find Linux AMD64 download URL"
-                echo "Available assets:"
-                echo "\$LATEST_RELEASE" | grep '"browser_download_url"' | cut -d'"' -f4
-                exit 1
-            fi
-            
-            echo "Downloading from: \$DOWNLOAD_URL"
-            
-            # Download the archive
-            if ! curl -L --fail --silent --show-error "\$DOWNLOAD_URL" -o /tmp/fossa.archive; then
-                echo "❌ Download failed"
-                exit 1
-            fi
-            
-            # Verify download
-            if [ ! -f /tmp/fossa.archive ] || [ ! -s /tmp/fossa.archive ]; then
-                echo "❌ Download failed or file is empty"
-                exit 1
-            fi
-            
-            # Check file type and extract accordingly
-            FILE_TYPE=\$(file /tmp/fossa.archive)
-            echo "File type: \$FILE_TYPE"
-            
-            if echo "\$FILE_TYPE" | grep -q "gzip"; then
-                echo "Extracting tar.gz archive..."
-                tar -xzf /tmp/fossa.archive -C /tmp/
-            elif echo "\$FILE_TYPE" | grep -q "Zip"; then
-                echo "Extracting zip archive..."
-                unzip -q /tmp/fossa.archive -d /tmp/
-            else
-                echo "❌ Unknown file type: \$FILE_TYPE"
-                echo "File contents (first 50 bytes):"
-                head -c 50 /tmp/fossa.archive | hexdump -C
-                exit 1
-            fi
-            
-            # Find the fossa binary (check multiple possible locations)
-            FOSSA_BINARY=""
-            
-            # Look for fossa binary in extracted files
-            for possible_path in \$(find /tmp -name "fossa" -type f 2>/dev/null); do
-                if [ -x "\$possible_path" ]; then
-                    FOSSA_BINARY="\$possible_path"
-                    break
-                fi
-            done
-            
-            # If not found as executable, look for any fossa file and make it executable
-            if [ -z "\$FOSSA_BINARY" ]; then
-                FOSSA_BINARY=\$(find /tmp -name "fossa" -type f 2>/dev/null | head -n1)
-                if [ -n "\$FOSSA_BINARY" ]; then
-                    chmod +x "\$FOSSA_BINARY"
-                fi
-            fi
-            
-            if [ -z "\$FOSSA_BINARY" ]; then
-                echo "❌ Could not find fossa binary after extraction"
-                echo "Contents of /tmp after extraction:"
-                ls -la /tmp/
-                echo "Looking for any fossa-related files:"
-                find /tmp -name "*fossa*" -type f 2>/dev/null || echo "No fossa files found"
-                exit 1
-            fi
-            
-            echo "Found FOSSA binary at: \$FOSSA_BINARY"
-            
-            # Copy binary to bin directory
-            cp "\$FOSSA_BINARY" \${HOME}/bin/fossa
-            
-            # Make executable
-            chmod +x \${HOME}/bin/fossa
-            
-            # Clean up
-            rm -f /tmp/fossa.archive
-            rm -rf /tmp/fossa_* /tmp/fossa-* /tmp/fossa
-            
-            # Add to PATH for this session
-            export PATH=\${HOME}/bin:\$PATH
-            
-            # Verify installation
-            echo "Verifying FOSSA CLI installation..."
-            \${HOME}/bin/fossa --version
-        """
-        
-        env.PATH = "${env.HOME}/bin:${env.PATH}"
-        
-    } else {
-        echo "✅ FOSSA CLI already installed: ${fossaInstalled}"
-        sh "fossa --version"
-    }
-}
-
-def configureFossa() {
-    echo "⚙️ Configuring FOSSA..."
-    
-    // Validate API key is set
-    if (!env.FOSSA_API_KEY) {
-        error("❌ FOSSA_API_KEY environment variable is required. Please set it in Jenkins credentials.")
-    }
-    
-    // Create FOSSA config file
-    writeFile file: '.fossa.yml', text: """
-version: 3
-server: https://app.fossa.com
-apiKey: ${env.FOSSA_API_KEY}
-
-project:
-  name: "${env.JOB_NAME}"
-
-targets:
-  auto:
-    type: auto
-    path: .
-"""
-    
-    echo "✅ FOSSA configuration created"
-}
-
-def runFossaAnalysis() {
-    echo "🔍 Running FOSSA dependency analysis..."
-    
-    sh """
-        mkdir -p ${env.SECURITY_REPORTS_DIR ?: 'security-reports'}/fossa/
-        fossa analyze --config .fossa.yml --debug 2>&1 | tee ${env.SECURITY_REPORTS_DIR ?: 'security-reports'}/fossa/analysis.log
-    """
-    
-    echo "✅ FOSSA analysis completed"
-}
-
-def runFossaTest() {
-    echo "🧪 Running FOSSA license and vulnerability tests..."
-    
-    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-        sh """
-            fossa test \\
-                --config .fossa.yml \\
-                --timeout ${params.FOSSA_TEST_TIMEOUT ?: '600'} \\
-                --format json \\
-                ${params.FOSSA_TEST_ARGS ?: ''} \\
-                > ${env.SECURITY_REPORTS_DIR ?: 'security-reports'}/fossa/test-results.json
-        """
-        echo "✅ FOSSA tests passed - no license violations found"
-    }
-    
-    echo "📊 FOSSA test completed - results saved to test-results.json"
-}
-
-def publishFossaResults() {
-    echo "📊 Publishing FOSSA results..."
-    
-    def reportsDir = env.SECURITY_REPORTS_DIR ?: 'security-reports'
-    
-    // Archive all FOSSA reports
-    archiveArtifacts artifacts: "${reportsDir}/fossa/**/*", allowEmptyArchive: true
-    
-    // Parse and publish test results if available
-    if (fileExists("${reportsDir}/fossa/test-results.json")) {
-        publishFossaTestResults()
-    }
-    
-    // Generate Jenkins-friendly warnings from FOSSA results
-    generateFossaWarnings()
-}
-
-def publishFossaTestResults() {
-    echo "📈 Publishing FOSSA test results..."
-    
-    def reportsDir = env.SECURITY_REPORTS_DIR ?: 'security-reports'
-    def testResultsFile = "${reportsDir}/fossa/test-results.json"
-    
-    if (fileExists(testResultsFile)) {
-        try {
-            def testResults = readJSON file: testResultsFile
-            
-            // Create summary for build description
-            def licenseIssues = testResults.issues?.license?.size() ?: 0
-            def vulnerabilityIssues = testResults.issues?.vulnerability?.size() ?: 0
-            def totalDependencies = testResults.dependencies?.size() ?: 0
-            
-            def summary = """
-FOSSA Scan Results:
-- License Issues: ${licenseIssues}
-- Vulnerability Issues: ${vulnerabilityIssues}
-- Total Dependencies: ${totalDependencies}
-"""
-            
-            // Add to build description
-            currentBuild.description = (currentBuild.description ?: '') + "\n" + summary
-            
-            echo "📊 FOSSA Results Summary:\n${summary}"
-            
-            // Set build result based on issues found
-            if (licenseIssues > 0 || vulnerabilityIssues > 0) {
-                currentBuild.result = 'UNSTABLE'
-            }
-            
-        } catch (Exception e) {
-            echo "⚠️ Error processing FOSSA test results: ${e.getMessage()}"
-        }
-    }
-}
-
-def generateFossaWarnings() {
-    echo "⚠️ Generating FOSSA warnings for Jenkins..."
-    
-    def reportsDir = env.SECURITY_REPORTS_DIR ?: 'security-reports'
-    
-    // Use Python for warning generation - more robust than shell
-    sh """
-        python3 -c "
-import json
-import os
-import sys
-
-warnings_text = ''
-warnings_count = 0
-
-# Check for test results
-test_results_file = '${reportsDir}/fossa/test-results.json'
-if os.path.exists(test_results_file):
-    with open(test_results_file, 'r') as f:
-        try:
-            test_results = json.load(f)
-            
-            # Process license issues
-            license_issues = test_results.get('issues', {}).get('license', [])
-            for issue in license_issues:
-                dep_name = issue.get('dependency', {}).get('name', 'Unknown')
-                license_type = issue.get('license', {}).get('name', 'Unknown')
-                rule = issue.get('rule', {}).get('name', 'Unknown rule')
-                
-                warnings_text += f'WARNING: License issue in {dep_name} - {license_type} violates rule: {rule}\\n'
-                warnings_count += 1
-            
-            # Process vulnerability issues
-            vuln_issues = test_results.get('issues', {}).get('vulnerability', [])
-            for issue in vuln_issues:
-                dep_name = issue.get('dependency', {}).get('name', 'Unknown')
-                vuln_id = issue.get('vulnerability', {}).get('id', 'Unknown')
-                severity = issue.get('vulnerability', {}).get('severity', 'Unknown')
-                
-                warnings_text += f'WARNING: Vulnerability {vuln_id} ({severity}) found in {dep_name}\\n'
-                warnings_count += 1
-                
-        except json.JSONDecodeError as e:
-            warnings_text += f'ERROR: Could not parse FOSSA test results: {e}\\n'
-            warnings_count += 1
-        except Exception as e:
-            warnings_text += f'ERROR: Error processing FOSSA results: {e}\\n'
-            warnings_count += 1
-
-# Create warnings directory if it doesn't exist
-os.makedirs('${reportsDir}', exist_ok=True)
-
-# Write warnings file
-with open('${reportsDir}/fossa-warnings.txt', 'w') as f:
-    f.write(warnings_text)
-
-print(f'Generated {warnings_count} warnings')
-" || {
-    echo "Python failed, falling back to shell-based warning generation..."
-    
-    # Shell-based warning generation as fallback
-    WARNINGS_FILE="${reportsDir}/fossa-warnings.txt"
-    TEST_RESULTS_FILE="${reportsDir}/fossa/test-results.json"
-    
-    mkdir -p ${reportsDir}
-    
-    # Clear warnings file
-    > "\$WARNINGS_FILE"
-    
-    if [ -f "\$TEST_RESULTS_FILE" ]; then
-        echo "Processing FOSSA test results..."
-        
-        # Simple grep-based extraction (basic fallback)
-        if grep -q '"license"' "\$TEST_RESULTS_FILE"; then
-            echo "WARNING: License issues found in FOSSA scan" >> "\$WARNINGS_FILE"
-        fi
-        
-        if grep -q '"vulnerability"' "\$TEST_RESULTS_FILE"; then
-            echo "WARNING: Vulnerability issues found in FOSSA scan" >> "\$WARNINGS_FILE"
-        fi
-        
-        # Count issues
-        LICENSE_COUNT=\$(grep -c '"license"' "\$TEST_RESULTS_FILE" 2>/dev/null || echo 0)
-        VULN_COUNT=\$(grep -c '"vulnerability"' "\$TEST_RESULTS_FILE" 2>/dev/null || echo 0)
-        
-        echo "Generated warnings for \$LICENSE_COUNT license issues and \$VULN_COUNT vulnerability issues"
-    else
-        echo "No FOSSA test results found"
-    fi
-}
-    """
-    
-    publishWarnings()
-}
-
-def publishWarnings() {
-    def reportsDir = env.SECURITY_REPORTS_DIR ?: 'security-reports'
-    
-    // Publish warnings if any exist
-    if (fileExists("${reportsDir}/fossa-warnings.txt")) {
-        def warningsContent = readFile("${reportsDir}/fossa-warnings.txt")
-        
-        if (warningsContent.trim()) {
-            try {
-                recordIssues(
-                    enabledForFailure: false,
-                    aggregatingResults: false,
-                    tools: [
-                        issues(
-                            pattern: "${reportsDir}/fossa-warnings.txt",
-                            name: 'FOSSA Issues'
-                        )
-                    ],
-                    qualityGates: [[threshold: 1, type: 'TOTAL', unstable: true]],
-                    name: 'License & Vulnerability',
-                    id: 'fossa-scan'
-                )
-            } catch (Exception e) {
-                echo "⚠️ Could not publish warnings to Jenkins: ${e.getMessage()}"
-                echo "Warnings content:"
-                echo warningsContent
-            }
-        }
-    }
-}
-
-
-def runScanCodeLicenseCheck() {
-    // Install ScanCode using pip with --user flag and dependency resolution
-    sh '''
-        echo "Installing ScanCode with dependency resolution..."
-        
-        # Upgrade pip first
-        pip3 install --user --upgrade pip
-        
-        # Install ScanCode with specific dependency versions to avoid conflicts
-        pip3 install --user --upgrade scancode-toolkit
-        
-        # Fix known dependency conflicts if they exist
-        pip3 install --user --force-reinstall "click>=8.1.0,<8.2.0" || echo "Click version conflict detected but continuing..."
-        
-        # Add user bin to PATH
-        export PATH="$HOME/.local/bin:$PATH"
-        
-        # Verify installation
-        scancode --version
-    '''
-    
-    // Run ScanCode license scan with optimizations
-
-sh '''
-    export PATH="$HOME/.local/bin:$PATH"
-    
-    echo "Running optimized ScanCode license scan..."
-    
-    # Create comprehensive ignore file
-    cat > .scancode-ignore << 'IGNORE_EOF'
-# Version control
-.git/*
-.svn/*
-.hg/*
-
-# Dependencies and build artifacts
-*node_modules/*
-*venv/*
-*env/*
-*virtualenv/*
-*__pycache__/*
-*target/*
-*build/*
-*dist/*
-*out/*
-*.egg-info/*
-*vendor/*
-*third_party/*
-
-# Binary and compiled files
-*.pyc
-*.pyo
-*.class
-*.jar
-*.war
-*.ear
-*.exe
-*.bin
-*.so
-*.dll
-*.dylib
-*.a
-*.lib
-*.o
-*.obj
-
-# Archives
-*.zip
-*.tar
-*.tar.gz
-*.tgz
-*.rar
-*.7z
-
-# Logs and temporary files
-*.log
-*.tmp
-*temp/*
-*tmp/*
-*.cache
-*.pid
-
-# IDE and editor files
-.vscode/*
-.idea/*
-*.swp
-*.swo
-*~
-
-# Project specific
-*dependency-check/*
-*security-reports/*
-*trivy-bin/*
-*.db
-*.mv.db
-*coverage/*
-*reports/*
-*.min.js
-*.min.css
-
-# More dependency managers
-*bower_components/*
-*jspm_packages/*
-*packages/*
-*.nuget/*
-*node_modules.nosync/*
-
-# More build/generated content
-*cmake-build-*/*
-*.gradle/*
-*bazel-*/*
-*_build/*
-*generated/*
-*gen/*
-*.generated.*
-
-# Documentation that might be large
-*docs/_build/*
-*site-packages/*
-*htmlcov/*
-
-# More binary/media files
-*.pdf
-*.doc
-*.docx
-*.xls
-*.xlsx
-*.ppt
-*.pptx
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.ico
-*.svg
-*.mp4
-*.mp3
-*.wav
-*.avi
-
-# Database files
-*.sqlite
-*.sqlite3
-*.db3
-*.mdb
-*.accdb
-IGNORE_EOF
-
-    # Calculate optimal process count
-    PROCESSES=$(nproc 2>/dev/null || echo "2")
-    AVAILABLE_MEMORY=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "4096")
-    
-    # Optimize process count based on both CPU and memory
-    MAX_PROCESSES_BY_MEMORY=$((AVAILABLE_MEMORY / 1024))
-    if [ "$MAX_PROCESSES_BY_MEMORY" -lt 1 ]; then
-        MAX_PROCESSES_BY_MEMORY=1
-    fi
-    
-    PROCESSES=$(( PROCESSES < MAX_PROCESSES_BY_MEMORY ? PROCESSES : MAX_PROCESSES_BY_MEMORY ))
-    if [ "$PROCESSES" -gt 6 ]; then
-        PROCESSES=6
-    fi
-    
-    echo "Using $PROCESSES processes for scanning"
-    
-    # Set timeout based on expected scan size
-    FILE_COUNT=$(find . -type f \\( ! -path './.git/*' ! -path './node_modules/*' ! -path './venv/*' ! -path './build/*' ! -path './dist/*' \\) | wc -l 2>/dev/null || echo "1000")
-    echo "Estimated files to scan: $FILE_COUNT"
-    
-    # Dynamic timeout: base 30min + 1min per 1000 files, max 2 hours
-    TIMEOUT=$((1800 + (FILE_COUNT / 1000) * 60))
-    if [ "$TIMEOUT" -gt 7200 ]; then
-        TIMEOUT=7200
-    fi
-    
-    echo "Setting timeout to $TIMEOUT seconds ($((TIMEOUT / 60)) minutes)"
-    
-    timeout $TIMEOUT scancode \\
-        --license \\
-        --copyright \\
-        --processes $PROCESSES \\
-        --timeout 600 \\
-        --ignore .scancode-ignore \\
-        --json license-results.json \\
-        --html license-report.html \\
-        --strip-root \\
-        --verbose \\
-        --max-in-memory 50 \\
-        --license-score 70 \\
-        . || {
-        EXIT_CODE=$?
-        echo "ScanCode exit code: $EXIT_CODE"
-        
-        case $EXIT_CODE in
-            124)
-                echo "⚠️  ScanCode timed out after $((TIMEOUT / 60)) minutes"
-                if [ -f license-results.json ] && [ -s license-results.json ]; then
-                    echo "📄 Partial results may be available"
-                    if jq empty license-results.json 2>/dev/null; then
-                        echo "✅ Partial results are valid JSON - continuing"
-                        exit 0
-                    fi
-                fi
-                exit 1
-                ;;
-            0)
-                echo "✅ ScanCode completed successfully"
-                ;;
-            *)
-                if [ -f license-results.json ] && [ -s license-results.json ]; then
-                    echo "⚠️  ScanCode completed with warnings but produced results"
-                    if jq empty license-results.json 2>/dev/null; then
-                        echo "✅ Results are valid JSON - continuing"
-                        exit 0
-                    else
-                        echo "❌ Results file is corrupted"
-                        exit 1
-                    fi
-                else
-                    echo "❌ ScanCode failed completely - no results produced"
-                    exit 1
-                fi
-                ;;
-        esac
-    }
-    
-    # NOW verify the results (after ScanCode has run)
-    if [ ! -f license-results.json ]; then
-        echo "❌ ERROR: license-results.json not created"
-        exit 1
-    fi
-    
-    # Check if JSON is valid and not empty
-    if ! jq empty license-results.json 2>/dev/null; then
-        echo "❌ ERROR: license-results.json is not valid JSON"
-        exit 1
-    fi
-    
-    echo "✅ ScanCode scan completed successfully"
-    
-    # Generate license compliance report
-    cat > license-compliance.html << 'EOF'
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ScanCode License Compliance Report</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .header { background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-        .summary { background-color: #e6f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-        .license-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        .license-table th, .license-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        .license-table th { background-color: #f2f2f2; }
-        .risk-high { background-color: #ffe6e6; }
-        .risk-medium { background-color: #fff3e6; }
-        .risk-low { background-color: #e6ffe6; }
-        .timestamp { color: #666; font-size: 0.9em; }
-        pre { background-color: #f5f5f5; padding: 10px; overflow-x: auto; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>📋 ScanCode License Compliance Report</h1>
-        <p class="timestamp">Generated: $(date)</p>
-    </div>
-    
-    <div class="summary">
-        <h2>📊 Quick Summary</h2>
-        <div id="summary-content">
-EOF
-        
-        # Parse results and add summary
-        if [ -f license-results.json ]; then
-            echo "        <p><strong>Total Files Scanned:</strong> $(jq -r '.headers[0].summary.file_count // "N/A"' license-results.json)</p>" >> license-compliance.html
-            echo "        <p><strong>Files with Licenses:</strong> $(jq -r '.headers[0].summary.license_clarity_score.total // "N/A"' license-results.json)</p>" >> license-compliance.html
-            echo "        <p><strong>Unique Licenses Found:</strong> $(jq -r '.license_references | length // "N/A"' license-results.json)</p>" >> license-compliance.html
-        fi
-        
-        cat >> license-compliance.html << 'EOF'
-        </div>
-    </div>
-    
-    <div class="summary">
-        <h2>⚖️ License Summary</h2>
-        <pre>
-EOF
-        
-        # Add license summary
-        if [ -f license-summary.txt ]; then
-            head -20 license-summary.txt >> license-compliance.html
-            if [ $(wc -l < license-summary.txt) -gt 20 ]; then
-                echo "... (truncated, see full report for complete list)" >> license-compliance.html
-            fi
-        else
-            echo "No license summary available" >> license-compliance.html
-        fi
-        
-        cat >> license-compliance.html << 'EOF'
-        </pre>
-    </div>
-    
-    <div class="summary">
-        <h2>📄 Full Report</h2>
-        <p>For the complete detailed report with all findings, <a href="license-report.html">click here to view the full ScanCode HTML report</a></p>
-    </div>
-    
-</body>
-</html>
-EOF
-        
-        # Check for high-risk licenses (customize this list as needed)
-        HIGH_RISK_LICENSES="gpl-2.0 gpl-3.0 agpl-3.0 lgpl-2.1 lgpl-3.0"
-        
-        echo "Checking for high-risk licenses..."
-        for license in $HIGH_RISK_LICENSES; do
-            if grep -q "$license" license-summary.txt; then
-                echo "WARNING: Found high-risk license: $license"
-            fi
-        done
-    '''
-    
-    // Archive the results
-    archiveArtifacts artifacts: 'license-results.json, license-report.html, license-summary.txt, license-compliance.html', fingerprint: true, allowEmptyArchive: true
-    
-    // Publish HTML report to Jenkins menu
-    publishHTML([
-        allowMissing: false,
-        alwaysLinkToLastBuild: true,
-        keepAll: true,
-        reportDir: '.',
-        reportFiles: 'license-compliance.html',
-        reportName: 'License Compliance Report',
-        reportTitles: 'ScanCode License Compliance'
-    ])
-    
-    // Also publish detailed ScanCode report
-    publishHTML([
-        allowMissing: false,
-        alwaysLinkToLastBuild: true,
-        keepAll: true,
-        reportDir: '.',
-        reportFiles: 'license-report.html',
-        reportName: 'Detailed ScanCode Report',
-        reportTitles: 'Full ScanCode Analysis'
-    ])
 }
