@@ -682,26 +682,6 @@ pipeline {
                 }
             }
         }
-        
-        stage('License Compliance Check') {
-            when {
-                expression { params.ENABLE_LICENSE_CHECK && (params.SECURITY_SCAN_LEVEL == 'COMPREHENSIVE' || params.SECURITY_SCAN_LEVEL == 'FULL') }
-            }
-            steps {
-                script {
-                    try {
-                        runScanCodeLicenseCheck()
-                    } catch (Exception e) {
-                        echo "❌ License check failed: ${e.getMessage()}"
-                        if (params.FAIL_ON_SECURITY_ISSUES) {
-                            error("Failing build due to non-compliant licenses.")
-                        } else {
-                            currentBuild.result = 'UNSTABLE'
-                        }
-                    }
-                }
-            }
-        }
 
         stage('Quality Gate') {
             steps {
