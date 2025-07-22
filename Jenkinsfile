@@ -799,7 +799,8 @@ def uploadArtifacts() {
 def uploadDotnetBinaries() {
     echo "📤 Uploading .NET binaries..."
     def filesToUpload = findFiles(glob: '**/bin/Release/**/*.{dll,exe,pdb}')
-    if (filesToUpload.isEmpty()) {
+    // FIX: Check the size of the array, not isEmpty()
+    if (filesToUpload.size() == 0) {
         echo "⚠️ No Release binaries found to upload."
         return false
     }
@@ -828,7 +829,8 @@ def uploadDotnetBinaries() {
 def uploadNugetPackages() {
     echo "📤 Uploading NuGet packages..."
     def nugetPackages = findFiles(glob: '**/*.nupkg')
-    if (nugetPackages.isEmpty()) {
+    // FIX: Check the size of the array, not isEmpty()
+    if (nugetPackages.size() == 0) {
         echo "⚠️ No NuGet packages found to upload."
         return false
     }
