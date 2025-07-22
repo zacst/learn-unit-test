@@ -345,7 +345,7 @@ def runBuildTestAndSast() {
     withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
         try {
             installDotnetTool('dotnet-sonarscanner')
-            startSonarScanner(env.SONAR_TOKEN)
+            startSonarScanner()
 
             buildSolution()
             runNunitTests()
@@ -383,19 +383,20 @@ def installDotnetTool(String toolName, String version = '') {
  */
 def startSonarScanner(String sonarToken) {
     echo "🔍 Starting SonarQube analysis..."
-    sh """
-        export PATH="\$PATH:\$HOME/.dotnet/tools"
-        export SONAR_TOKEN="${sonarToken}"
-        dotnet sonarscanner begin \\
-            /k:"\$SONAR_PROJECT_KEY" \\
-            /d:sonar.host.url="\$SONARQUBE_URL" \\
-            /d:sonar.login="\$SONAR_TOKEN" \\
-            /d:sonar.cs.nunit.reportsPaths="\$TEST_RESULTS_DIR/*.trx" \\
-            /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
-            /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
-            /d:sonar.test.exclusions="**/*.Tests/**" \\
-            /d:sonar.coverage.exclusions="**/*.Tests/**"
-    """
+    withEnv(["SONAR_TOKEN=${sonarToken}"]) {
+        sh """
+            export PATH="\$PATH:\$HOME/.dotnet/tools"
+            dotnet sonarscanner begin \\
+                /k:"\$SONAR_PROJECT_KEY" \\
+                /d:sonar.host.url="\$SONARQUBE_URL" \\
+                /d:sonar.login="\$SONAR_TOKEN" \\
+                /d:sonar.cs.nunit.reportsPaths="\$TEST_RESULTS_DIR/*.trx" \\
+                /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
+                /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
+                /d:sonar.test.exclusions="**/*.Tests/**" \\
+                /d:sonar.coverage.exclusions="**/*.Tests/**"
+        """
+    }
 }
 
 /**
