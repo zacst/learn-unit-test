@@ -349,6 +349,11 @@ def runBuildTestAndSast() {
                 
                 startSonarScanner()
                 buildSolution()
+                    sh '''
+                        echo "--- Verifying build artifacts ---"
+                        ls -Rla
+                        echo "---------------------------------"
+                    '''
                 runNunitTests()
                 generateCoverageReports()
 
