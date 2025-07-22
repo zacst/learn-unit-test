@@ -343,25 +343,26 @@ def runBuildTestAndSast() {
     sh "mkdir -p ${TEST_RESULTS_DIR} ${COVERAGE_REPORTS_DIR}"
 
     withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-        try {
-            installDotnetTool('dotnet-sonarscanner')
-            startSonarScanner()
+        withEnv(["SONAR_LOGIN_TOKEN=${SONAR_TOKEN}"]) {
+            try {
+                installDotnetTool('dotnet-sonarscanner')
+                
+                startSonarScanner()
+                buildSolution()
+                runNunitTests()
+                generateCoverageReports()
 
-            buildSolution()
-            runNunitTests()
-            generateCoverageReports()
-
-        } catch (e) {
-            echo "❌ Build, Test, or SonarQube analysis failed: ${e.getMessage()}"
-            if (params.FAIL_ON_TEST_FAILURE) {
-                throw e
-            } else {
-                currentBuild.result = 'UNSTABLE'
-                echo "⚠️ Build marked as unstable due to failures."
+            } catch (e) {
+                echo "❌ Build, Test, or SonarQube analysis failed: ${e.getMessage()}"
+                if (params.FAIL_ON_TEST_FAILURE) {
+                    throw e
+                } else {
+                    currentBuild.result = 'UNSTABLE'
+                    echo "⚠️ Build marked as unstable due to failures."
+                }
+            } finally {
+                endSonarScanner(env.SONAR_TOKEN)
             }
-        } finally {
-            // Always try to end the SonarQube scan
-            endSonarScanner(env.SONAR_TOKEN)
         }
     }
 }
@@ -388,7 +389,7 @@ def startSonarScanner() {
         dotnet sonarscanner begin \\
             /k:"\$SONAR_PROJECT_KEY" \\
             /d:sonar.host.url="\$SONARQUBE_URL" \\
-            /d:sonar.login="\$SONAR_TOKEN" \\
+            /d:sonar.login="\$SONAR_LOGIN_TOKEN" \\
             /d:sonar.cs.nunit.reportsPaths="\$TEST_RESULTS_DIR/*.trx" \\
             /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
             /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
@@ -472,13 +473,13 @@ def generateCoverageReports() {
 /**
  * Ends the SonarQube scanner analysis.
  */
-def endSonarScanner(String sonarToken) {
+def endSonarScanner() {
     try {
         echo "🔍 Completing SonarQube analysis..."
-        sh """
-            export PATH="\$PATH:\$HOME/.dotnet/tools"
-            dotnet sonarscanner end /d:sonar.login="\$sonarToken"
-        """
+        sh '''
+            export PATH="$PATH:$HOME/.dotnet/tools"
+            dotnet sonarscanner end /d:sonar.login="$SONAR_LOGIN_TOKEN"
+        '''
     } catch (Exception e) {
         echo "⚠️ Could not end SonarQube analysis gracefully: ${e.getMessage()}"
     }
