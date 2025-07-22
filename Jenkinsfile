@@ -38,7 +38,6 @@ pipeline {
         DAST_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/dast"
 
         // --- SonarQube Configuration ---
-        SONARQUBE_URL = 'http://localhost:9000'
         SONAR_PROJECT_KEY = 'calculator' // Replace with your SonarQube project key
 
         // --- JFrog Artifactory Configuration ---
@@ -343,7 +342,7 @@ def runBuildTestAndSast() {
     sh "mkdir -p ${TEST_RESULTS_DIR} ${COVERAGE_REPORTS_DIR}"
 
     withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-        withEnv(["SONAR_LOGIN_TOKEN=${SONAR_TOKEN}"]) {
+        withSonarQubeEnv('sonar-server') {
             try {
                 installDotnetTool('dotnet-sonarscanner')
                 
@@ -390,11 +389,8 @@ def installDotnetTool(String toolName, String version = '') {
 def startSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
     sh '''
-        export PATH="$PATH:$HOME/.dotnet/tools"
         dotnet sonarscanner begin \\
             /k:"$SONAR_PROJECT_KEY" \\
-            /d:sonar.host.url="$SONARQUBE_URL" \\
-            /d:sonar.login="$SONAR_LOGIN_TOKEN" \\
             /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \\
             /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
             /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
@@ -481,10 +477,7 @@ def generateCoverageReports() {
 def endSonarScanner() {
     try {
         echo "🔍 Completing SonarQube analysis..."
-        sh '''
-            export PATH="$PATH:$HOME/.dotnet/tools"
-            dotnet sonarscanner end /d:sonar.login="$SONAR_LOGIN_TOKEN"
-        '''
+        sh 'dotnet sonarscanner end'
     } catch (Exception e) {
         echo "⚠️ Could not end SonarQube analysis gracefully: ${e.getMessage()}"
     }
