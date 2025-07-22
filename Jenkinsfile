@@ -38,6 +38,7 @@ pipeline {
         DAST_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/dast"
 
         // --- SonarQube Configuration ---
+        SONARQUBE_URL = 'http://localhost:9000'
         SONAR_PROJECT_KEY = 'calculator' // Replace with your SonarQube project key
 
         // --- JFrog Artifactory Configuration ---
@@ -392,6 +393,7 @@ def startSonarScanner() {
         export PATH="$PATH:$HOME/.dotnet/tools"
         dotnet sonarscanner begin \\
             /k:"$SONAR_PROJECT_KEY" \\
+            /d:sonar.host.url="$SONARQUBE_URL" \\
             /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \\
             /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
             /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
