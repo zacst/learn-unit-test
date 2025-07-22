@@ -361,7 +361,7 @@ def runBuildTestAndSast() {
                     echo "⚠️ Build marked as unstable due to failures."
                 }
             } finally {
-                endSonarScanner(env.SONAR_TOKEN)
+                endSonarScanner()
             }
         }
     }
@@ -655,7 +655,7 @@ def publishLintResults() {
         writeJSON file: reportSarifFile, json: sarifReport, pretty: 4
 
         recordIssues(
-            tool: sarif(pattern: reportSarifFile, id: 'dotnet-format', name: 'Code Style (dotnet-format)'),
+            tool: sarif(pattern: reportSarifFile, id: 'dotnet-format', name: 'Linting'),
             qualityGates: [
                 [threshold: 1, type: 'TOTAL', unstable: true]
             ]
