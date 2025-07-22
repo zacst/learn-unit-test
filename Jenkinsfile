@@ -602,12 +602,13 @@ def runLinting() {
     try {
         sh "mkdir -p ${LINTER_REPORTS_DIR}"
         def solutionFile = findFiles(glob: '**/*.sln')
-        if (!solutionFile) {
+        if (solutionFile.size() == 0) {
             error "❌ Could not find a solution file (.sln) to lint."
         }
 
         installDotnetTool('dotnet-format', env.DOTNET_FORMAT_VERSION)
 
+        // The '--report' flag generates a JSON file with all findings.
         def formatResult = sh(
             script: """
                 export PATH="\$PATH:\$HOME/.dotnet/tools"
@@ -624,9 +625,9 @@ def runLinting() {
         }
     } catch (Exception e) {
         lintingStatus = 'UNSTABLE'
-        echo "❌ Linting check encountered an error: ${e.message}"
+        echo "❌ Linting check encountered an error: ${e.getMessage()}"
     } finally {
-        // Publish results regardless of outcome
+        // Always attempt to publish the results.
         publishLintResults()
         if (lintingStatus == 'UNSTABLE') {
             currentBuild.result = 'UNSTABLE'
@@ -648,15 +649,12 @@ def publishLintResults() {
     }
 
     try {
-        // Archive the raw JSON report for debugging
         archiveArtifacts artifacts: reportJsonFile, allowEmptyArchive: true
 
-        // Convert the raw report to SARIF format
         def jsonContent = readJSON file: reportJsonFile
         def sarifReport = convertDotnetFormatToSarif(jsonContent)
         writeJSON file: reportSarifFile, json: sarifReport, pretty: 4
 
-        // Publish the SARIF report to the Jenkins UI
         recordIssues(
             tool: sarif(pattern: reportSarifFile, id: 'dotnet-format', name: 'Code Style (dotnet-format)'),
             qualityGates: [
@@ -672,33 +670,51 @@ def publishLintResults() {
 
 /**
  * Converts the JSON output from `dotnet-format` to the standard SARIF format.
+ * This version handles both formatting changes and analyzer diagnostics.
  * @param jsonReport The parsed JSON object from the dotnet-format report.
  * @return A Map representing the SARIF report.
  */
 def convertDotnetFormatToSarif(jsonReport) {
     def results = []
-    jsonReport.documents.each { doc ->
-        def filePath = doc.filePath
-        doc.fileChanges.each { change ->
-            results.add([
-                ruleId: change.diagnosticId ?: "FORMAT",
-                message: [
-                    text: change.formatDescription
-                ],
-                locations: [
-                    [
-                        physicalLocation: [
-                            artifactLocation: [
-                                uri: filePath.replace("${env.WORKSPACE}/", "") // Use relative path
-                            ],
-                            region: [
-                                startLine: change.lineNumber,
-                                startColumn: change.charNumber
+
+    if (jsonReport && jsonReport.documents) {
+        jsonReport.documents.each { doc ->
+            def relativePath = doc.filePath.replace("${env.WORKSPACE}/", "")
+
+            // --- FIX 1: Process formatting changes (WHITESPACE) ---
+            if (doc.fileChanges) {
+                doc.fileChanges.each { change ->
+                    results.add([
+                        ruleId: change.diagnosticId ?: "WHITESPACE",
+                        level: "note", // Treat pure formatting as a "note" level issue.
+                        message: [ text: change.formatDescription ],
+                        locations: [[
+                            physicalLocation: [
+                                artifactLocation: [ uri: relativePath ],
+                                region: [ startLine: change.lineNumber, startColumn: change.charNumber ]
                             ]
-                        ]
-                    ]
-                ]
-            ])
+                        ]]
+                    ])
+                }
+            }
+
+            // --- FIX 2: Process analyzer diagnostics (e.g., S2187) ---
+            // This section was missing before.
+            if (doc.diagnostics) {
+                doc.diagnostics.each { diagnostic ->
+                    results.add([
+                        ruleId: diagnostic.diagnosticId,
+                        level: diagnostic.severity.toLowerCase(), // Uses the severity from the report (e.g., "warning")
+                        message: [ text: diagnostic.message ],
+                        locations: [[
+                            physicalLocation: [
+                                artifactLocation: [ uri: relativePath ],
+                                region: [ startLine: diagnostic.location.startLine, startColumn: diagnostic.location.startColumn ]
+                            ]
+                        ]]
+                    ])
+                }
+            }
         }
     }
 
@@ -706,19 +722,16 @@ def convertDotnetFormatToSarif(jsonReport) {
     def sarif = [
         '$schema': "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
         version: "2.1.0",
-        runs: [
-            [
-                tool: [
-                    driver: [
-                        name: "dotnet-format",
-                        rules: []
-                    ]
-                ],
-                results: results
-            ]
-        ]
+        runs: [[
+            tool: [
+                driver: [
+                    name: "dotnet-format",
+                    rules: []
+                ]
+            ],
+            results: results
+        ]]
     ]
-
     return sarif
 }
 
