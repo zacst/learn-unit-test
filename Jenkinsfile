@@ -389,6 +389,7 @@ def installDotnetTool(String toolName, String version = '') {
 def startSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
     sh '''
+        export PATH="$PATH:$HOME/.dotnet/tools"
         dotnet sonarscanner begin \\
             /k:"$SONAR_PROJECT_KEY" \\
             /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \\
@@ -477,7 +478,10 @@ def generateCoverageReports() {
 def endSonarScanner() {
     try {
         echo "🔍 Completing SonarQube analysis..."
-        sh 'dotnet sonarscanner end'
+        sh '''
+            export PATH="$PATH:$HOME/.dotnet/tools"
+            dotnet sonarscanner end
+        '''
     } catch (Exception e) {
         echo "⚠️ Could not end SonarQube analysis gracefully: ${e.getMessage()}"
     }
