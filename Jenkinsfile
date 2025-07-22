@@ -381,7 +381,7 @@ def installDotnetTool(String toolName, String version = '') {
 /**
  * Starts the SonarQube scanner.
  */
-def startSonarScanner(String sonarToken) {
+def startSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
     withEnv(["SONAR_TOKEN=${sonarToken}"]) {
         sh """
