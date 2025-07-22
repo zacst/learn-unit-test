@@ -849,24 +849,38 @@ def publishSecurityResults() {
 //---------------------------------
 
 /**
- * Orchestrates the upload of artifacts to JFrog Artifactory.
+ * Main controller function for uploads.
+ * It gathers all artifact rules, builds a single File Spec, and runs one upload command.
  */
 def uploadArtifacts() {
-    echo "📦 Uploading artifacts to JFrog Artifactory..."
+    echo "📦 Preparing to upload artifacts to JFrog Artifactory..."
     try {
+        // 1. Verify connection
         jf 'rt ping'
         echo "✅ JFrog Artifactory connection successful."
 
-        def artifactsUploaded = uploadDotnetBinaries()
-        def nugetUploaded = uploadNugetPackages()
-        uploadReports()
+        // 2. Gather all upload rules from helper functions
+        def allSpecEntries = []
+        allSpecEntries.addAll(getBinarySpecEntries())
+        allSpecEntries.addAll(getNugetSpecEntries())
+        allSpecEntries.addAll(getReportSpecEntries())
 
-        if (artifactsUploaded || nugetUploaded) {
+        // 3. Proceed only if there are items to upload
+        if (allSpecEntries.size() > 0) {
+            def spec = [files: allSpecEntries]
+            writeFile file: 'upload-spec.json', text: groovy.json.JsonOutput.toJson(spec)
+            echo "📝 Generated a single, unified upload spec:"
+            sh 'cat upload-spec.json'
+
+            // 4. Execute a single upload and publish one build-info package
+            jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
             jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
-            echo "✅ Build info published successfully."
+            
+            echo "✅ Successfully uploaded all artifacts and published build info."
         } else {
-            echo "⚠️ No artifacts were uploaded; build info will not be published."
+            echo "⚠️ No artifacts found to upload. Skipping."
         }
+
     } catch (e) {
         echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
         currentBuild.result = 'UNSTABLE'
@@ -874,65 +888,64 @@ def uploadArtifacts() {
 }
 
 /**
- * Uploads .NET binaries (.dll, .exe) to Artifactory.
+ * Finds .NET binaries and returns their File Spec rules.
+ * @return A list of maps, with each map being an entry for the File Spec.
  */
-def uploadDotnetBinaries() {
-    echo "📤 Uploading .NET binaries..."
-    def filesToUpload = findFiles(glob: '**/bin/Release/**/*.{dll,exe,pdb}')
-    // FIX: Check the size of the array, not isEmpty()
-    if (filesToUpload.size() == 0) {
-        echo "⚠️ No Release binaries found to upload."
-        return false
+def List getBinarySpecEntries() {
+    def entries = []
+    def binaryFiles = findFiles(glob: '**/bin/Release/**/*')
+    if (binaryFiles.size() > 0) {
+        echo "  - Found ${binaryFiles.size()} .NET Release binaries to upload."
+        entries.add([
+            "pattern": "*/bin/Release/",
+            "target": "${ARTIFACTORY_REPO_BINARIES}/${JOB_NAME}/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false"
+        ])
     }
-
-    def spec = """
-    {
-      "files": [
-        {
-          "pattern": "*/bin/Release/",
-          "target": "${ARTIFACTORY_REPO_BINARIES}/${JOB_NAME}/${BUILD_NUMBER}/",
-          "recursive": "true",
-          "flat": "false"
-        }
-      ]
-    }
-    """
-    writeFile file: 'upload-spec.json', text: spec
-    jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
-    echo "✅ .NET binaries uploaded."
-    return true
+    return entries
 }
 
 /**
- * Uploads NuGet packages (.nupkg) to Artifactory.
+ * Finds NuGet packages and returns their File Spec rules.
+ * @return A list of maps, with each map being an entry for the File Spec.
  */
-def uploadNugetPackages() {
-    echo "📤 Uploading NuGet packages..."
-    def nugetPackages = findFiles(glob: '**/*.nupkg')
-    // FIX: Check the size of the array, not isEmpty()
-    if (nugetPackages.size() == 0) {
-        echo "⚠️ No NuGet packages found to upload."
-        return false
+def List getNugetSpecEntries() {
+    def entries = []
+    def nugetFiles = findFiles(glob: '**/*.nupkg')
+    if (nugetFiles.size() > 0) {
+        echo "  - Found ${nugetFiles.size()} NuGet packages to upload."
+        entries.add([
+            "pattern": "**/bin/Release/*.nupkg",
+            "target": "${ARTIFACTORY_REPO_NUGET}/",
+            "flat": "true"
+        ])
     }
-    
-    jf "rt u '**/*.nupkg' ${ARTIFACTORY_REPO_NUGET}/ --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER} --flat=true"
-    echo "✅ NuGet packages uploaded."
-    return true
+    return entries
 }
 
 /**
- * Uploads build reports (test results, coverage) to Artifactory.
+ * Finds build reports and returns their File Spec rules.
+ * @return A list of maps, with each map being an entry for the File Spec.
  */
-def uploadReports() {
-    echo "📤 Uploading build reports..."
-    // Upload test results
+def List getReportSpecEntries() {
+    def entries = []
     if (fileExists(TEST_RESULTS_DIR)) {
-        jf "rt u '${TEST_RESULTS_DIR}/*' ${ARTIFACTORY_REPO_REPORTS}/test-results/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --flat=false"
+        echo "  - Found test results to upload."
+        entries.add([
+            "pattern": "${TEST_RESULTS_DIR}/(*.trx)",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/test-results/${BUILD_NUMBER}/"
+        ])
     }
-    // Upload coverage reports
     if (fileExists(COVERAGE_REPORTS_DIR)) {
-        jf "rt u '${COVERAGE_REPORTS_DIR}/**' ${ARTIFACTORY_REPO_REPORTS}/coverage/${JFROG_CLI_BUILD_NAME}/${JFROG_CLI_BUILD_NUMBER}/ --flat=false"
+        echo "  - Found coverage reports to upload."
+        entries.add([
+            "pattern": "${COVERAGE_REPORTS_DIR}/",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/coverage/${BUILD_NUMBER}/",
+            "recursive": "true"
+        ])
     }
+    return entries
 }
 
 
