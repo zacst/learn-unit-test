@@ -839,36 +839,37 @@ def publishSecurityResults() {
 //---------------------------------
 
 /**
- * Main controller function for uploads.
+ * The main controller function for uploads.
  * It gathers all artifact rules, builds a single File Spec, and runs one upload command.
+ * This is the recommended best practice.
  */
 def uploadArtifacts() {
     echo "📦 Preparing to upload artifacts to JFrog Artifactory..."
     try {
+        // 1. Verify connection to Artifactory
         jf 'rt ping'
         echo "✅ JFrog Artifactory connection successful."
 
+        // 2. Gather all upload rules from separate helper functions
         def allSpecEntries = []
         allSpecEntries.addAll(getBinarySpecEntries())
         allSpecEntries.addAll(getNugetSpecEntries())
         allSpecEntries.addAll(getReportSpecEntries())
 
+        // 3. Proceed only if there are items to upload
         if (allSpecEntries.size() > 0) {
             def spec = [files: allSpecEntries]
             writeFile file: 'upload-spec.json', text: groovy.json.JsonOutput.toJson(spec)
             echo "📝 Generated a single, unified upload spec:"
             sh 'cat upload-spec.json'
 
-            // --- WORKAROUND CHANGE ---
-            // Step 1: Upload files WITHOUT build-name and build-number.
-            // This sends a much simpler request that proxies are less likely to break.
-            jf "rt u --spec=upload-spec.json"
-
-            // Step 2: Now, publish the build info. This command associates the
-            // files uploaded in the step above with the build record.
+            // 4. Execute a single upload command using the spec
+            jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
+            
+            // 5. Publish all collected build information in one go
             jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
             
-            echo "✅ Successfully uploaded artifacts and published build info."
+            echo "✅ Successfully uploaded all artifacts and published build info."
         } else {
             echo "⚠️ No artifacts found to upload. Skipping."
         }
@@ -881,7 +882,6 @@ def uploadArtifacts() {
 
 /**
  * Finds .NET binaries and returns their File Spec rules.
- * @return A list of maps, with each map being an entry for the File Spec.
  */
 def List getBinarySpecEntries() {
     def entries = []
@@ -900,7 +900,6 @@ def List getBinarySpecEntries() {
 
 /**
  * Finds NuGet packages and returns their File Spec rules.
- * @return A list of maps, with each map being an entry for the File Spec.
  */
 def List getNugetSpecEntries() {
     def entries = []
@@ -918,7 +917,6 @@ def List getNugetSpecEntries() {
 
 /**
  * Finds build reports and returns their File Spec rules.
- * @return A list of maps, with each map being an entry for the File Spec.
  */
 def List getReportSpecEntries() {
     def entries = []
