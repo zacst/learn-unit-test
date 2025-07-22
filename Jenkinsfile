@@ -839,44 +839,70 @@ def publishSecurityResults() {
 //---------------------------------
 
 /**
- * The main controller function for uploads.
- * It gathers all artifact rules, builds a single File Spec, and runs one upload command.
- * This is the recommended best practice.
+ * Main function to upload artifacts one at a time.
+ * NOTE: This is an inefficient anti-pattern, intended only for diagnostics.
  */
 def uploadArtifacts() {
-    echo "📦 Preparing to upload artifacts to JFrog Artifactory..."
+    echo "📦 Preparing to upload artifacts one-by-one (Diagnostic Mode)..."
     try {
-        // 1. Verify connection to Artifactory
         jf 'rt ping'
         echo "✅ JFrog Artifactory connection successful."
 
-        // 2. Gather all upload rules from separate helper functions
-        def allSpecEntries = []
-        allSpecEntries.addAll(getBinarySpecEntries())
-        allSpecEntries.addAll(getNugetSpecEntries())
-        allSpecEntries.addAll(getReportSpecEntries())
+        // Find all files to be uploaded
+        def binaryFiles = findFiles(glob: '**/bin/Release/**/*.*')
+        def nugetFiles = findFiles(glob: '**/bin/Release/*.nupkg')
+        def reportFiles = findFiles(glob: "${COVERAGE_REPORTS_DIR}/**/*.*, ${TEST_RESULTS_DIR}/*.trx")
 
-        // 3. Proceed only if there are items to upload
-        if (allSpecEntries.size() > 0) {
-            def spec = [files: allSpecEntries]
-            writeFile file: 'upload-spec.json', text: groovy.json.JsonOutput.toJson(spec)
-            echo "📝 Generated a single, unified upload spec:"
-            sh 'cat upload-spec.json'
-
-            // 4. Execute a single upload command using the spec
-            jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
-            
-            // 5. Publish all collected build information in one go
-            jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
-            
-            echo "✅ Successfully uploaded all artifacts and published build info."
-        } else {
-            echo "⚠️ No artifacts found to upload. Skipping."
+        // --- Upload Binaries One by One ---
+        echo "📤 Uploading ${binaryFiles.size()} binary files..."
+        binaryFiles.each { file ->
+            // Target path preserves the original structure relative to the workspace
+            def targetPath = "${ARTIFACTORY_REPO_BINARIES}/${file.path}"
+            uploadSingleFile(file.path, targetPath)
         }
+
+        // --- Upload NuGet Packages One by One ---
+        echo "📤 Uploading ${nugetFiles.size()} NuGet packages..."
+        nugetFiles.each { file ->
+            // NuGet repos are usually flat
+            def targetPath = "${ARTIFACTORY_REPO_NUGET}/${file.name}"
+            uploadSingleFile(file.path, targetPath)
+        }
+
+        // --- Upload Reports One by One ---
+        echo "📤 Uploading ${reportFiles.size()} report files..."
+        reportFiles.each { file ->
+            def targetPath = "${ARTIFACTORY_REPO_REPORTS}/${file.path}"
+            uploadSingleFile(file.path, targetPath)
+        }
+
+        // After all individual uploads, try to publish the build info.
+        // The CLI will collect all files uploaded during this session.
+        echo "📊 Publishing build information..."
+        jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
+        
+        echo "✅ Upload process completed."
 
     } catch (e) {
         echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
         currentBuild.result = 'UNSTABLE'
+    }
+}
+
+/**
+ * Helper to upload a single file to Artifactory.
+ * This simplified command has a higher chance of passing through a restrictive proxy.
+ * @param sourcePath The local path of the file to upload.
+ * @param targetPath The full destination path in Artifactory.
+ */
+def uploadSingleFile(String sourcePath, String targetPath) {
+    try {
+        echo "  -> Uploading ${sourcePath} to ${targetPath}"
+        // This command associates the upload with the build via headers, which is the modern way.
+        jf "rt u \"${sourcePath}\" \"${targetPath}\" --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
+    } catch (e) {
+        echo "  ⚠️ Failed to upload ${sourcePath}: ${e.getMessage()}"
+        // Continue without failing the whole build
     }
 }
 
