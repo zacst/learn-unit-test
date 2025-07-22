@@ -852,9 +852,10 @@ def uploadArtifacts() {
         jf 'rt ping'
         echo "✅ JFrog Artifactory connection successful."
 
-        // Find all files to be uploaded
-        def binaryFiles = findFiles(glob: '**/bin/Release/**/*.*')
-        def nugetFiles = findFiles(glob: '**/bin/Release/*.nupkg')
+        // --- FIX: Search in both Release and Debug directories ---
+        // The {Release,Debug} syntax tells the command to look in both folders.
+        def binaryFiles = findFiles(glob: '**/bin/{Release,Debug}/**/*.*')
+        def nugetFiles = findFiles(glob: '**/bin/{Release,Debug}/*.nupkg')
         def reportFiles = findFiles(glob: "${COVERAGE_REPORTS_DIR}/**/*.*, ${TEST_RESULTS_DIR}/*.trx")
 
         // --- Upload Binaries One by One ---
@@ -881,7 +882,6 @@ def uploadArtifacts() {
         }
 
         // After all individual uploads, try to publish the build info.
-        // The CLI will collect all files uploaded during this session.
         echo "📊 Publishing build information..."
         jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
         
