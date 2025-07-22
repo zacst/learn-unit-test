@@ -846,7 +846,7 @@ def publishSecurityResults() {
  * The main controller function for uploads.
  * It gathers all artifact rules, builds a single File Spec, and runs one upload command.
  */
-def uploadArtifactsWithFileSpec() {
+def uploadArtifacts() {
     echo "📦 Preparing to upload artifacts using best practices..."
     try {
         // 1. Verify connection to Artifactory
