@@ -608,7 +608,6 @@ def runLinting() {
 
         installDotnetTool('dotnet-format', env.DOTNET_FORMAT_VERSION)
 
-        // The '--report' flag generates a JSON file with all findings.
         def formatResult = sh(
             script: """
                 export PATH="\$PATH:\$HOME/.dotnet/tools"
@@ -627,7 +626,6 @@ def runLinting() {
         lintingStatus = 'UNSTABLE'
         echo "❌ Linting check encountered an error: ${e.getMessage()}"
     } finally {
-        // Always attempt to publish the results.
         publishLintResults()
         if (lintingStatus == 'UNSTABLE') {
             currentBuild.result = 'UNSTABLE'
@@ -670,50 +668,31 @@ def publishLintResults() {
 
 /**
  * Converts the JSON output from `dotnet-format` to the standard SARIF format.
- * This version handles both formatting changes and analyzer diagnostics.
- * @param jsonReport The parsed JSON object from the dotnet-format report.
+ * This version correctly handles the actual report structure.
+ * @param jsonReport The parsed JSON object from the dotnet-format report (which is a List).
  * @return A Map representing the SARIF report.
  */
-def convertDotnetFormatToSarif(jsonReport) {
+def convertDotnetFormatToSarif(List jsonReport) {
     def results = []
 
-    if (jsonReport && jsonReport.documents) {
-        jsonReport.documents.each { doc ->
-            def relativePath = doc.filePath.replace("${env.WORKSPACE}/", "")
+    // FIX: Iterate directly over the report, which is a List/Array.
+    jsonReport.each { doc ->
+        // FIX: Use PascalCase for all property names to match the actual report.
+        def relativePath = doc.FilePath.replace("${env.WORKSPACE}/", "")
 
-            // --- FIX 1: Process formatting changes (WHITESPACE) ---
-            if (doc.fileChanges) {
-                doc.fileChanges.each { change ->
-                    results.add([
-                        ruleId: change.diagnosticId ?: "WHITESPACE",
-                        level: "note", // Treat pure formatting as a "note" level issue.
-                        message: [ text: change.formatDescription ],
-                        locations: [[
-                            physicalLocation: [
-                                artifactLocation: [ uri: relativePath ],
-                                region: [ startLine: change.lineNumber, startColumn: change.charNumber ]
-                            ]
-                        ]]
-                    ])
-                }
-            }
-
-            // --- FIX 2: Process analyzer diagnostics (e.g., S2187) ---
-            // This section was missing before.
-            if (doc.diagnostics) {
-                doc.diagnostics.each { diagnostic ->
-                    results.add([
-                        ruleId: diagnostic.diagnosticId,
-                        level: diagnostic.severity.toLowerCase(), // Uses the severity from the report (e.g., "warning")
-                        message: [ text: diagnostic.message ],
-                        locations: [[
-                            physicalLocation: [
-                                artifactLocation: [ uri: relativePath ],
-                                region: [ startLine: diagnostic.location.startLine, startColumn: diagnostic.location.startColumn ]
-                            ]
-                        ]]
-                    ])
-                }
+        if (doc.FileChanges) {
+            doc.FileChanges.each { change ->
+                results.add([
+                    ruleId: change.DiagnosticId ?: "WHITESPACE",
+                    level: "note", // Treat pure formatting as a "note" level issue.
+                    message: [ text: change.FormatDescription ],
+                    locations: [[
+                        physicalLocation: [
+                            artifactLocation: [ uri: relativePath ],
+                            region: [ startLine: change.LineNumber, startColumn: change.CharNumber ]
+                        ]
+                    ]]
+                ])
             }
         }
     }
@@ -734,7 +713,6 @@ def convertDotnetFormatToSarif(jsonReport) {
     ]
     return sarif
 }
-
 
 //---------------------------------
 // Test Project Discovery Helpers
