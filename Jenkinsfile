@@ -843,129 +843,61 @@ def publishSecurityResults() {
 //---------------------------------
 
 /**
- * Main function to upload artifacts one at a time.
- * NOTE: This is an inefficient anti-pattern, intended only for diagnostics.
+ * Main function to find all artifacts, upload them one-by-one, and then
+ * publish a single, consolidated build-info package.
  */
 def uploadArtifacts() {
-    echo "📦 Preparing to upload artifacts one-by-one (Diagnostic Mode)..."
+    echo "📦 Preparing to upload artifacts..."
     try {
         jf 'rt ping'
         echo "✅ JFrog Artifactory connection successful."
 
-        // --- FIX: Search in both Release and Debug directories ---
-        // The {Release,Debug} syntax tells the command to look in both folders.
+        // 1. Find all files to be uploaded from both Debug and Release folders
         def binaryFiles = findFiles(glob: '**/bin/{Release,Debug}/**/*.*')
         def nugetFiles = findFiles(glob: '**/bin/{Release,Debug}/*.nupkg')
         def reportFiles = findFiles(glob: "${COVERAGE_REPORTS_DIR}/**/*.*, ${TEST_RESULTS_DIR}/*.trx")
 
-        // --- Upload Binaries One by One ---
-        echo "📤 Uploading ${binaryFiles.size()} binary files..."
-        binaryFiles.each { file ->
-            // Target path preserves the original structure relative to the workspace
-            def targetPath = "${ARTIFACTORY_REPO_BINARIES}/${file.path}"
-            uploadSingleFile(file.path, targetPath)
-        }
+        // 2. Upload each category of files
+        uploadFileList(binaryFiles, ARTIFACTORY_REPO_BINARIES, "binary")
+        uploadFileList(nugetFiles, ARTIFACTORY_REPO_NUGET, "NuGet package")
+        uploadFileList(reportFiles, ARTIFACTORY_REPO_REPORTS, "report")
 
-        // --- Upload NuGet Packages One by One ---
-        echo "📤 Uploading ${nugetFiles.size()} NuGet packages..."
-        nugetFiles.each { file ->
-            // NuGet repos are usually flat
-            def targetPath = "${ARTIFACTORY_REPO_NUGET}/${file.name}"
-            uploadSingleFile(file.path, targetPath)
-        }
-
-        // --- Upload Reports One by One ---
-        echo "📤 Uploading ${reportFiles.size()} report files..."
-        reportFiles.each { file ->
-            def targetPath = "${ARTIFACTORY_REPO_REPORTS}/${file.path}"
-            uploadSingleFile(file.path, targetPath)
-        }
-
-        // After all individual uploads, try to publish the build info.
+        // 3. After all uploads are complete, publish the build information.
+        // The CLI automatically collects all files uploaded with the same build name/number.
         echo "📊 Publishing build information..."
         jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
         
-        echo "✅ Upload process completed."
+        echo "✅ Upload process and build-info publishing completed."
 
     } catch (e) {
-        echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
+        echo "❌ JFrog Artifactory stage failed: ${e.getMessage()}"
         currentBuild.result = 'UNSTABLE'
     }
 }
 
 /**
- * Helper to upload a single file to Artifactory.
- * This simplified command has a higher chance of passing through a restrictive proxy.
- * @param sourcePath The local path of the file to upload.
- * @param targetPath The full destination path in Artifactory.
+ * Loops through a list of files and uploads each one to a specified repository.
+ * @param fileList The list of file objects from the findFiles step.
+ * @param targetRepo The Artifactory repository to upload to.
+ * @param fileType A string description for logging (e.g., "binary").
  */
-def uploadSingleFile(String sourcePath, String targetPath) {
-    try {
-        echo "  -> Uploading ${sourcePath} to ${targetPath}"
-        // This command associates the upload with the build via headers, which is the modern way.
-        jf "rt u \"${sourcePath}\" \"${targetPath}\" --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
-    } catch (e) {
-        echo "  ⚠️ Failed to upload ${sourcePath}: ${e.getMessage()}"
-        // Continue without failing the whole build
+def uploadFileList(fileList, String targetRepo, String fileType) {
+    if (fileList.size() > 0) {
+        echo "📤 Uploading ${fileList.size()} ${fileType} file(s)..."
+        fileList.each { file ->
+            try {
+                // The target path preserves the original directory structure
+                def targetPath = "${targetRepo}/${file.path}"
+                echo "  -> Uploading ${file.path}"
+                
+                // This command associates the upload with the build via headers, which is the modern way.
+                jf "rt u \"${file.path}\" \"${targetPath}\" --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
+            } catch (e) {
+                echo "  ⚠️ Failed to upload ${file.path}: ${e.getMessage()}"
+                // Continue without failing the entire build
+            }
+        }
     }
-}
-
-/**
- * Finds .NET binaries and returns their File Spec rules.
- */
-def List getBinarySpecEntries() {
-    def entries = []
-    def binaryFiles = findFiles(glob: '**/bin/Release/**/*')
-    if (binaryFiles.size() > 0) {
-        echo "  - Found ${binaryFiles.size()} .NET Release binaries to upload."
-        entries.add([
-            "pattern": "*/bin/Release/",
-            "target": "${ARTIFACTORY_REPO_BINARIES}/${JOB_NAME}/${BUILD_NUMBER}/",
-            "recursive": "true",
-            "flat": "false"
-        ])
-    }
-    return entries
-}
-
-/**
- * Finds NuGet packages and returns their File Spec rules.
- */
-def List getNugetSpecEntries() {
-    def entries = []
-    def nugetFiles = findFiles(glob: '**/*.nupkg')
-    if (nugetFiles.size() > 0) {
-        echo "  - Found ${nugetFiles.size()} NuGet packages to upload."
-        entries.add([
-            "pattern": "**/bin/Release/*.nupkg",
-            "target": "${ARTIFACTORY_REPO_NUGET}/",
-            "flat": "true"
-        ])
-    }
-    return entries
-}
-
-/**
- * Finds build reports and returns their File Spec rules.
- */
-def List getReportSpecEntries() {
-    def entries = []
-    if (fileExists(TEST_RESULTS_DIR)) {
-        echo "  - Found test results to upload."
-        entries.add([
-            "pattern": "${TEST_RESULTS_DIR}/(*.trx)",
-            "target": "${ARTIFACTORY_REPO_REPORTS}/test-results/${BUILD_NUMBER}/"
-        ])
-    }
-    if (fileExists(COVERAGE_REPORTS_DIR)) {
-        echo "  - Found coverage reports to upload."
-        entries.add([
-            "pattern": "${COVERAGE_REPORTS_DIR}/",
-            "target": "${ARTIFACTORY_REPO_REPORTS}/coverage/${BUILD_NUMBER}/",
-            "recursive": "true"
-        ])
-    }
-    return entries
 }
 
 
