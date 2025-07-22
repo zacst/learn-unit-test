@@ -594,10 +594,11 @@ def processGitleaksResults() {
 //---------------------------------
 
 /**
- * Runs the .NET linter (dotnet-format).
+ * Runs the .NET linter (dotnet-format) and calls the publisher.
  */
 def runLinting() {
     echo "💅 Running .NET Linter (dotnet-format)..."
+    def lintingStatus = 'SUCCESS'
     try {
         sh "mkdir -p ${LINTER_REPORTS_DIR}"
         def solutionFile = findFiles(glob: '**/*.sln')
@@ -606,7 +607,7 @@ def runLinting() {
         }
 
         installDotnetTool('dotnet-format', env.DOTNET_FORMAT_VERSION)
-        
+
         def formatResult = sh(
             script: """
                 export PATH="\$PATH:\$HOME/.dotnet/tools"
@@ -618,28 +619,107 @@ def runLinting() {
         if (formatResult == 0) {
             echo "✅ Code style is consistent."
         } else {
-            echo "ℹ️ Formatting issues found. Check the report."
-            currentBuild.result = 'UNSTABLE'
+            lintingStatus = 'UNSTABLE'
+            echo "ℹ️ Formatting issues found. The build will be marked as unstable."
         }
     } catch (Exception e) {
+        lintingStatus = 'UNSTABLE'
         echo "❌ Linting check encountered an error: ${e.message}"
-        currentBuild.result = 'UNSTABLE'
     } finally {
+        // Publish results regardless of outcome
         publishLintResults()
+        if (lintingStatus == 'UNSTABLE') {
+            currentBuild.result = 'UNSTABLE'
+        }
     }
 }
 
 /**
- * Publishes linting results.
+ * Publishes linting results to Jenkins UI by converting the report to SARIF.
  */
 def publishLintResults() {
     echo "📊 Publishing linting results..."
-    def reportFile = "${LINTER_REPORTS_DIR}/dotnet-format.json"
-    if (fileExists(reportFile)) {
-        archiveArtifacts artifacts: reportFile, allowEmptyArchive: true
-        // If you have a plugin that can parse this format, you can add it here.
-        // For now, we archive it.
+    def reportJsonFile = "${LINTER_REPORTS_DIR}/dotnet-format.json"
+    def reportSarifFile = "${LINTER_REPORTS_DIR}/linting-report.sarif"
+
+    if (!fileExists(reportJsonFile)) {
+        echo "⚠️ Linting report file not found. Skipping publishing."
+        return
     }
+
+    try {
+        // Archive the raw JSON report for debugging
+        archiveArtifacts artifacts: reportJsonFile, allowEmptyArchive: true
+
+        // Convert the raw report to SARIF format
+        def jsonContent = readJSON file: reportJsonFile
+        def sarifReport = convertDotnetFormatToSarif(jsonContent)
+        writeJSON file: reportSarifFile, json: sarifReport, pretty: 4
+
+        // Publish the SARIF report to the Jenkins UI
+        recordIssues(
+            tool: sarif(pattern: reportSarifFile, id: 'dotnet-format', name: 'Code Style (dotnet-format)'),
+            qualityGates: [
+                [threshold: 1, type: 'TOTAL', unstable: true]
+            ]
+        )
+        echo "✅ Linting results published to Jenkins UI."
+
+    } catch (Exception e) {
+        echo "⚠️ Could not publish linting results: ${e.getMessage()}"
+    }
+}
+
+/**
+ * Converts the JSON output from `dotnet-format` to the standard SARIF format.
+ * @param jsonReport The parsed JSON object from the dotnet-format report.
+ * @return A Map representing the SARIF report.
+ */
+def convertDotnetFormatToSarif(jsonReport) {
+    def results = []
+    jsonReport.documents.each { doc ->
+        def filePath = doc.filePath
+        doc.fileChanges.each { change ->
+            results.add([
+                ruleId: change.diagnosticId ?: "FORMAT",
+                message: [
+                    text: change.formatDescription
+                ],
+                locations: [
+                    [
+                        physicalLocation: [
+                            artifactLocation: [
+                                uri: filePath.replace("${env.WORKSPACE}/", "") // Use relative path
+                            ],
+                            region: [
+                                startLine: change.lineNumber,
+                                startColumn: change.charNumber
+                            ]
+                        ]
+                    ]
+                ]
+            ])
+        }
+    }
+
+    // Construct the final SARIF structure
+    def sarif = [
+        '$schema': "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
+        version: "2.1.0",
+        runs: [
+            [
+                tool: [
+                    driver: [
+                        name: "dotnet-format",
+                        rules: []
+                    ]
+                ],
+                results: results
+            ]
+        ]
+    ]
+
+    return sarif
 }
 
 
