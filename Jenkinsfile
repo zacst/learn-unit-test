@@ -677,9 +677,7 @@ def publishLintResults() {
 def convertDotnetFormatToSarif(List jsonReport) {
     def results = []
 
-    // FIX: Iterate directly over the report, which is a List/Array.
     jsonReport.each { doc ->
-        // FIX: Use PascalCase for all property names to match the actual report.
         def relativePath = doc.FilePath.replace("${env.WORKSPACE}/", "")
 
         if (doc.FileChanges) {
