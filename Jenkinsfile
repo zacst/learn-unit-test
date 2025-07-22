@@ -386,7 +386,6 @@ def startSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
     sh '''
         export PATH="$PATH:$HOME/.dotnet/tools"
-        # This command uses the securely injected shell environment variable
         dotnet sonarscanner begin \\
             /k:"$SONAR_PROJECT_KEY" \\
             /d:sonar.host.url="$SONARQUBE_URL" \\
@@ -846,28 +845,30 @@ def publishSecurityResults() {
 def uploadArtifacts() {
     echo "📦 Preparing to upload artifacts to JFrog Artifactory..."
     try {
-        // 1. Verify connection
         jf 'rt ping'
         echo "✅ JFrog Artifactory connection successful."
 
-        // 2. Gather all upload rules from helper functions
         def allSpecEntries = []
         allSpecEntries.addAll(getBinarySpecEntries())
         allSpecEntries.addAll(getNugetSpecEntries())
         allSpecEntries.addAll(getReportSpecEntries())
 
-        // 3. Proceed only if there are items to upload
         if (allSpecEntries.size() > 0) {
             def spec = [files: allSpecEntries]
             writeFile file: 'upload-spec.json', text: groovy.json.JsonOutput.toJson(spec)
             echo "📝 Generated a single, unified upload spec:"
             sh 'cat upload-spec.json'
 
-            // 4. Execute a single upload and publish one build-info package
-            jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
+            // --- WORKAROUND CHANGE ---
+            // Step 1: Upload files WITHOUT build-name and build-number.
+            // This sends a much simpler request that proxies are less likely to break.
+            jf "rt u --spec=upload-spec.json"
+
+            // Step 2: Now, publish the build info. This command associates the
+            // files uploaded in the step above with the build record.
             jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
             
-            echo "✅ Successfully uploaded all artifacts and published build info."
+            echo "✅ Successfully uploaded artifacts and published build info."
         } else {
             echo "⚠️ No artifacts found to upload. Skipping."
         }
