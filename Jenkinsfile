@@ -11,7 +11,9 @@
  */
 
 pipeline {
-    agent any
+    agent {
+        label 'pipeline'
+    }
 
     tools {
         // Configure JFrog CLI tool in Jenkins Global Tool Configuration
