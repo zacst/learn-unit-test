@@ -19,9 +19,8 @@ RUN apt-get update && apt-get install -y \
     openjdk-11-jdk \
     && rm -rf /var/lib/apt/lists/*
 
-# Install JFrog CLI (since it's configured as a Jenkins tool)
-RUN curl -fL https://install-cli.jfrog.io | sh && \
-    mv jfrog /usr/local/bin/
+# Install JFrog CLI (it installs directly to /usr/local/bin as 'jf')
+RUN curl -fL https://install-cli.jfrog.io | sh
 
 # Create Jenkins user
 RUN groupadd -g 1000 jenkins && \
