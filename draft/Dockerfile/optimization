@@ -1,0 +1,168 @@
+
+# Jenkins Pipeline Dockerfile
+# Multi-stage build supporting both minimal and full tool installation strategies
+# 
+# Build arguments:
+# - DOTNET_VERSION: .NET SDK version (default: 6.0)
+# - INSTALL_ALL_TOOLS: Whether to pre-install all tools (default: false for minimal image)
+# - TRIVY_VERSION: Trivy version to install (default: 0.50.0)
+# - GITLEAKS_VERSION: Gitleaks version to install (default: 8.18.2)
+
+FROM mcr.microsoft.com/dotnet/sdk:6.0-jammy AS base
+
+# Build arguments
+ARG DOTNET_VERSION=6.0
+ARG INSTALL_ALL_TOOLS=false
+ARG TRIVY_VERSION=0.50.0
+ARG GITLEAKS_VERSION=8.18.2
+ARG DOTNET_FORMAT_VERSION=7.0.400
+
+# Environment variables for .NET
+ENV DOTNET_VERSION=${DOTNET_VERSION}
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=true
+ENV DOTNET_FORMAT_VERSION=${DOTNET_FORMAT_VERSION}
+ENV DOTNET_VERBOSITY=n
+
+# Tool versions
+ENV TRIVY_VERSION=${TRIVY_VERSION}
+ENV GITLEAKS_VERSION=${GITLEAKS_VERSION}
+
+# Set non-interactive frontend for apt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    unzip \
+    tar \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    python3 \
+    python3-pip \
+    python3-setuptools \
+    python3-wheel \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Install JFrog CLI
+RUN curl -fL https://getcli.jfrog.io | sh && \
+    mv jfrog /usr/local/bin/ && \
+    chmod +x /usr/local/bin/jfrog
+
+# ============================================================================
+# MINIMAL IMAGE STAGE (default)
+# ============================================================================
+FROM base AS minimal
+
+LABEL maintainer="DevOps Team"
+LABEL description="Minimal Jenkins pipeline image with .NET SDK and basic tools"
+LABEL strategy="minimal"
+
+# Install only essential Python packages for potential tool installation
+RUN pip3 install --no-cache-dir setuptools wheel
+
+# Verify .NET installation
+RUN dotnet --version && dotnet --info
+
+# Create directories that the pipeline expects
+RUN mkdir -p /workspace/test-results \
+             /workspace/coverage-reports \
+             /workspace/security-reports \
+             /workspace/linter-reports
+
+# Set up .NET tools path
+ENV PATH="${PATH}:/root/.dotnet/tools"
+
+# ============================================================================
+# FULL IMAGE STAGE (with all tools pre-installed)
+# ============================================================================
+FROM base AS full
+
+LABEL maintainer="DevOps Team"
+LABEL description="Full Jenkins pipeline image with all security tools pre-installed"
+LABEL strategy="full"
+
+# Install Python packages required for Semgrep
+RUN pip3 install --no-cache-dir \
+    semgrep \
+    setuptools \
+    wheel
+
+# Install Trivy
+RUN mkdir -p /opt/trivy && \
+    wget -q https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz && \
+    tar -xzf trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz -C /opt/trivy trivy && \
+    chmod +x /opt/trivy/trivy && \
+    ln -s /opt/trivy/trivy /usr/local/bin/trivy && \
+    rm trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz
+
+# Install Gitleaks
+RUN wget -q https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz && \
+    tar -xzf gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz && \
+    chmod +x gitleaks && \
+    mv gitleaks /usr/local/bin/ && \
+    rm gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+
+# Pre-install .NET global tools
+ENV PATH="${PATH}:/root/.dotnet/tools"
+RUN dotnet tool install --global dotnet-sonarscanner --version 5.14.0 && \
+    dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.2.0 && \
+    dotnet tool install --global dotnet-format --version ${DOTNET_FORMAT_VERSION}
+
+# Verify all tools are installed correctly
+RUN echo "=== Tool Verification ===" && \
+    dotnet --version && \
+    semgrep --version && \
+    trivy --version && \
+    gitleaks version && \
+    dotnet tool list -g && \
+    jfrog --version && \
+    echo "✅ All tools verified successfully"
+
+# Pre-download Trivy vulnerability database (optional, speeds up first run)
+RUN trivy image --download-db-only || echo "⚠️ Trivy DB download failed, will download at runtime"
+
+# Create directories that the pipeline expects
+RUN mkdir -p /workspace/test-results \
+             /workspace/coverage-reports \
+             /workspace/security-reports \
+             /workspace/linter-reports
+
+# ============================================================================
+# FINAL STAGE SELECTION
+# ============================================================================
+FROM ${INSTALL_ALL_TOOLS:+full} AS final-full
+FROM minimal AS final-minimal
+FROM final-${INSTALL_ALL_TOOLS:+full} AS final
+
+# Set working directory
+WORKDIR /workspace
+
+# Add health check script
+RUN echo '#!/bin/bash\n\
+echo "=== Jenkins Pipeline Image Health Check ==="\n\
+echo "Strategy: $(if [ -f /usr/local/bin/trivy ]; then echo "full"; else echo "minimal"; fi)"\n\
+echo ".NET Version: $(dotnet --version)"\n\
+echo "Available Tools:"\n\
+command -v semgrep >/dev/null && echo "  ✅ Semgrep: $(semgrep --version)" || echo "  ⚠️ Semgrep: Not installed"\n\
+command -v trivy >/dev/null && echo "  ✅ Trivy: $(trivy --version | head -1)" || echo "  ⚠️ Trivy: Not installed"\n\
+command -v gitleaks >/dev/null && echo "  ✅ Gitleaks: $(gitleaks version)" || echo "  ⚠️ Gitleaks: Not installed"\n\
+command -v jfrog >/dev/null && echo "  ✅ JFrog CLI: $(jfrog --version)" || echo "  ⚠️ JFrog CLI: Not installed"\n\
+echo ".NET Global Tools:"\n\
+dotnet tool list -g 2>/dev/null | tail -n +3 | while read line; do echo "  ✅ $line"; done || echo "  ⚠️ No global tools installed"\n\
+echo "=== Health Check Complete ==="\n' > /usr/local/bin/healthcheck.sh && \
+    chmod +x /usr/local/bin/healthcheck.sh
+
+# Add the health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD /usr/local/bin/healthcheck.sh
+
+# Set the default command
+CMD ["/bin/bash"]
