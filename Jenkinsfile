@@ -12,7 +12,7 @@
 
 pipeline {
     agent {
-        label 'pipeline'
+        label 'pipeline-agent'
     }
 
     tools {

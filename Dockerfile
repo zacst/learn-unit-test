@@ -22,12 +22,13 @@ RUN apt-get update && apt-get install -y \
 # Install JFrog CLI (it installs directly to /usr/local/bin as 'jf')
 RUN curl -fL https://install-cli.jfrog.io | sh
 
-# Create Jenkins user
-RUN groupadd -g 1000 jenkins && \
-    useradd -u 1000 -g jenkins -m -s /bin/bash jenkins
-
-# Set working directory
+# Set working directory (can be before or after user creation)
 WORKDIR /workspace
+
+# Create Jenkins user and set permissions
+RUN groupadd -g 1000 jenkins && \
+    useradd -u 1000 -g jenkins -m -s /bin/bash jenkins && \
+    chown -R jenkins:jenkins /workspace
 
 # Verify basic installations
 RUN echo "=== Base Image Verification ===" && \
@@ -39,3 +40,5 @@ RUN echo "=== Base Image Verification ===" && \
     echo "✅ Base image ready for runtime installations"
 
 USER jenkins
+
+CMD ["tail", "-f", "/dev/null"]
