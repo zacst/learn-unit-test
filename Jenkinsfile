@@ -347,32 +347,30 @@ def runBuildTestAndSast() {
     echo "🔨 Starting Build, Test, and SAST Analysis..."
     sh "mkdir -p ${TEST_RESULTS_DIR} ${COVERAGE_REPORTS_DIR}"
 
-    withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-        withSonarQubeEnv("${SONARQUBE_ENV}") {
-            try {
-                installDotnetTool('dotnet-sonarscanner')
-                
-                startSonarScanner()
-                buildSolution()
-                    sh '''
-                        echo "--- Verifying build artifacts ---"
-                        ls -Rla
-                        echo "---------------------------------"
-                    '''
-                runNunitTests()
-                generateCoverageReports()
+    withSonarQubeEnv("${SONARQUBE_ENV}") {
+        try {
+            installDotnetTool('dotnet-sonarscanner')
+            
+            startSonarScanner()
+            buildSolution()
+                sh '''
+                    echo "--- Verifying build artifacts ---"
+                    ls -Rla
+                    echo "---------------------------------"
+                '''
+            runNunitTests()
+            generateCoverageReports()
 
-            } catch (e) {
-                echo "❌ Build, Test, or SonarQube analysis failed: ${e.getMessage()}"
-                if (params.FAIL_ON_TEST_FAILURE) {
-                    throw e
-                } else {
-                    currentBuild.result = 'UNSTABLE'
-                    echo "⚠️ Build marked as unstable due to failures."
-                }
-            } finally {
-                endSonarScanner()
+        } catch (e) {
+            echo "❌ Build, Test, or SonarQube analysis failed: ${e.getMessage()}"
+            if (params.FAIL_ON_TEST_FAILURE) {
+                throw e
+            } else {
+                currentBuild.result = 'UNSTABLE'
+                echo "⚠️ Build marked as unstable due to failures."
             }
+        } finally {
+            endSonarScanner()
         }
     }
 }
