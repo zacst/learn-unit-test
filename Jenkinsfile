@@ -841,18 +841,26 @@ def publishSecurityResults() {
 
 
 //---------------------------------
-// JFrog Artifactory Helpers
+// JFrog Artifactory Helpers - Improved Version
 //---------------------------------
 
 /**
- * The main controller function for uploads.
+ * The main controller function for uploads with enhanced error handling and configuration.
  * It gathers all artifact rules, builds a single File Spec, and runs one upload command.
  */
 def uploadArtifacts() {
     echo "📦 Preparing to upload artifacts using best practices..."
+    
+    // Validate required environment variables
+    if (!validateEnvironment()) {
+        return
+    }
+    
     try {
-        // 1. Verify connection to Artifactory
-        jf 'rt ping'
+        // 1. Verify connection to Artifactory with timeout
+        timeout(time: 30, unit: 'SECONDS') {
+            jf 'rt ping'
+        }
         echo "✅ JFrog Artifactory connection successful."
 
         // 2. Gather all upload rules from separate helper functions
@@ -860,88 +868,293 @@ def uploadArtifacts() {
         allSpecEntries.addAll(getBinarySpecEntries())
         allSpecEntries.addAll(getNugetSpecEntries())
         allSpecEntries.addAll(getReportSpecEntries())
+        allSpecEntries.addAll(getDocumentationSpecEntries()) // Additional artifact type
 
         // 3. Proceed only if there are items to upload
         if (allSpecEntries.size() > 0) {
             def spec = [files: allSpecEntries]
             writeFile file: 'upload-spec.json', text: groovy.json.JsonOutput.toJson(spec)
-            echo "📝 Generated a single, unified upload spec:"
-            sh 'cat upload-spec.json'
-
-            // 4. Execute a single upload command using the spec
-            jf "rt u --spec=upload-spec.json --build-name=${JFROG_CLI_BUILD_NAME} --build-number=${JFROG_CLI_BUILD_NUMBER}"
+            echo "📝 Generated unified upload spec with ${allSpecEntries.size()} entries"
             
-            // 5. Publish all collected build information in one go
+            // Optional: Show spec in debug mode only
+            if (env.DEBUG_MODE == 'true') {
+                sh 'cat upload-spec.json'
+            }
+
+            // 4. Execute upload with enhanced options
+            def uploadCmd = "rt u --spec=upload-spec.json " +
+                          "--build-name=${JFROG_CLI_BUILD_NAME} " +
+                          "--build-number=${JFROG_CLI_BUILD_NUMBER} " +
+                          "--detailed-summary " +
+                          "--fail-no-op " +
+                          "--threads=3"
+            
+            jf uploadCmd
+            
+            // 5. Add build properties for better traceability
+            addBuildProperties()
+            
+            // 6. Publish build information
             jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
             
             echo "✅ Successfully uploaded all artifacts and published build info."
+            
         } else {
-            echo "⚠️ No artifacts found to upload. Skipping."
+            echo "⚠️ No artifacts found to upload. This might indicate a build issue."
+            // Consider failing the build if artifacts are expected
+            if (env.FAIL_ON_NO_ARTIFACTS == 'true') {
+                error("No artifacts found but artifacts were expected")
+            }
         }
 
-    } catch (e) {
-        echo "❌ JFrog Artifactory stage failed: ${e.getMessage()}"
-        currentBuild.result = 'UNSTABLE'
+    } catch (Exception e) {
+        echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
+        // More granular error handling
+        if (e.getMessage().contains('connection')) {
+            echo "💡 Consider checking network connectivity and credentials"
+        }
+        currentBuild.result = 'FAILURE' // Changed from UNSTABLE to FAILURE for upload failures
+        throw e // Re-throw to stop pipeline if needed
+    } finally {
+        // Cleanup temporary files
+        if (fileExists('upload-spec.json')) {
+            sh 'rm -f upload-spec.json'
+        }
     }
 }
 
 /**
- * Finds .NET binaries and returns their File Spec rules.
+ * Validates required environment variables and configuration.
+ */
+def validateEnvironment() {
+    def requiredVars = [
+        'JFROG_CLI_BUILD_NAME',
+        'JFROG_CLI_BUILD_NUMBER', 
+        'ARTIFACTORY_REPO_BINARIES',
+        'ARTIFACTORY_REPO_NUGET',
+        'ARTIFACTORY_REPO_REPORTS'
+    ]
+    
+    def missing = requiredVars.findAll { !env[it] }
+    if (missing) {
+        echo "❌ Missing required environment variables: ${missing.join(', ')}"
+        currentBuild.result = 'FAILURE'
+        return false
+    }
+    return true
+}
+
+/**
+ * Adds build properties for better traceability and metadata.
+ */
+def addBuildProperties() {
+    def properties = [
+        "build.timestamp=${new Date().format('yyyy-MM-dd HH:mm:ss')}",
+        "git.commit=${env.GIT_COMMIT ?: 'unknown'}",
+        "git.branch=${env.GIT_BRANCH ?: 'unknown'}",
+        "jenkins.job=${env.JOB_NAME}",
+        "jenkins.build=${env.BUILD_NUMBER}"
+    ]
+    
+    properties.each { prop ->
+        jf "rt bce ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER} ${prop}"
+    }
+}
+
+/**
+ * Finds .NET binaries and returns their File Spec rules with improved patterns.
  */
 def List getBinarySpecEntries() {
     def entries = []
-    // Looks in both Release and Debug folders to find the artifacts
-    def binaryFiles = findFiles(glob: '**/bin/{Release,Debug}/**/*.*')
-    if (binaryFiles.size() > 0) {
-        echo "  - Found ${binaryFiles.size()} .NET binaries to upload."
+    
+    // More specific patterns to avoid uploading unnecessary files
+    def binaryPatterns = [
+        '**/bin/Release/**/*.{exe,dll,pdb}',
+        '**/bin/Debug/**/*.{exe,dll,pdb}'
+    ]
+    
+    binaryPatterns.each { pattern ->
+        def binaryFiles = findFiles(glob: pattern)
+        if (binaryFiles.size() > 0) {
+            echo "  - Found ${binaryFiles.size()} binaries matching: ${pattern}"
+            
+            // Separate Release and Debug uploads with different retention
+            def config = pattern.contains('Release') ? 'release' : 'debug'
+            
+            entries.add([
+                "pattern": pattern,
+                "target": "${ARTIFACTORY_REPO_BINARIES}/${JOB_NAME}/${BUILD_NUMBER}/${config}/",
+                "recursive": "true",
+                "flat": "false",
+                "exclusions": ["**/*.tmp", "**/*.log", "**/obj/**"] // Exclude unwanted files
+            ])
+        }
+    }
+    
+    return entries
+}
+
+/**
+ * Finds NuGet packages with version validation.
+ */
+def List getNugetSpecEntries() {
+    def entries = []
+    def nugetFiles = findFiles(glob: '**/bin/**/*.nupkg')
+    
+    if (nugetFiles.size() > 0) {
+        echo "  - Found ${nugetFiles.size()} NuGet packages to upload."
+        
+        // Validate package versions if needed
+        validateNugetPackages(nugetFiles)
+        
         entries.add([
-            "pattern": "*/bin/{Release,Debug}/",
-            "target": "${ARTIFACTORY_REPO_BINARIES}/${JOB_NAME}/${BUILD_NUMBER}/",
+            "pattern": "**/bin/**/*.nupkg",
+            "target": "${ARTIFACTORY_REPO_NUGET}/",
+            "flat": "true",
+            "exclusions": ["**/*.symbols.nupkg"] // Handle symbols packages separately if needed
+        ])
+        
+        // Optional: Handle symbol packages separately
+        def symbolFiles = findFiles(glob: '**/bin/**/*.symbols.nupkg')
+        if (symbolFiles.size() > 0) {
+            echo "  - Found ${symbolFiles.size()} symbol packages to upload."
+            entries.add([
+                "pattern": "**/bin/**/*.symbols.nupkg",
+                "target": "${ARTIFACTORY_REPO_NUGET}/symbols/",
+                "flat": "true"
+            ])
+        }
+    }
+    
+    return entries
+}
+
+/**
+ * Validates NuGet package versions and names.
+ */
+def validateNugetPackages(files) {
+    files.each { file ->
+        if (file.name.contains(' ') || file.name.contains('..')) {
+            echo "⚠️ Potentially invalid package name: ${file.name}"
+        }
+    }
+}
+
+/**
+ * Finds build reports with organized structure.
+ */
+def List getReportSpecEntries() {
+    def entries = []
+    def timestamp = new Date().format('yyyy-MM-dd_HH-mm-ss')
+    
+    // Test results
+    if (env.TEST_RESULTS_DIR && fileExists(env.TEST_RESULTS_DIR)) {
+        echo "  - Found test results to upload."
+        entries.add([
+            "pattern": "${env.TEST_RESULTS_DIR}/**/*.{trx,xml,json}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/test-results/${BUILD_NUMBER}_${timestamp}/",
             "recursive": "true",
             "flat": "false"
         ])
     }
-    return entries
-}
-
-/**
- * Finds NuGet packages and returns their File Spec rules.
- */
-def List getNugetSpecEntries() {
-    def entries = []
-    def nugetFiles = findFiles(glob: '**/bin/{Release,Debug}/*.nupkg')
-    if (nugetFiles.size() > 0) {
-        echo "  - Found ${nugetFiles.size()} NuGet packages to upload."
-        entries.add([
-            "pattern": "*/bin/{Release,Debug}/*.nupkg",
-            "target": "${ARTIFACTORY_REPO_NUGET}/",
-            "flat": "true"
-        ])
-    }
-    return entries
-}
-
-/**
- * Finds build reports and returns their File Spec rules.
- */
-def List getReportSpecEntries() {
-    def entries = []
-    if (fileExists(TEST_RESULTS_DIR)) {
-        echo "  - Found test results to upload."
-        entries.add([
-            "pattern": "${TEST_RESULTS_DIR}/(*.trx)",
-            "target": "${ARTIFACTORY_REPO_REPORTS}/test-results/${BUILD_NUMBER}/"
-        ])
-    }
-    if (fileExists(COVERAGE_REPORTS_DIR)) {
+    
+    // Coverage reports
+    if (env.COVERAGE_REPORTS_DIR && fileExists(env.COVERAGE_REPORTS_DIR)) {
         echo "  - Found coverage reports to upload."
         entries.add([
-            "pattern": "${COVERAGE_REPORTS_DIR}/",
-            "target": "${ARTIFACTORY_REPO_REPORTS}/coverage/${BUILD_NUMBER}/",
+            "pattern": "${env.COVERAGE_REPORTS_DIR}/**/*",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/coverage/${BUILD_NUMBER}_${timestamp}/",
+            "recursive": "true",
+            "flat": "false",
+            "exclusions": ["**/*.tmp", "**/.git/**"]
+        ])
+    }
+    
+    // Static analysis reports (SonarQube, etc.)
+    def staticAnalysisDir = 'reports/static-analysis'
+    if (fileExists(staticAnalysisDir)) {
+        echo "  - Found static analysis reports to upload."
+        entries.add([
+            "pattern": "${staticAnalysisDir}/**/*",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/static-analysis/${BUILD_NUMBER}_${timestamp}/",
             "recursive": "true"
         ])
     }
+    
     return entries
+}
+
+/**
+ * Finds documentation artifacts.
+ */
+def List getDocumentationSpecEntries() {
+    def entries = []
+    
+    // API documentation
+    def docsDir = 'docs/api'
+    if (fileExists(docsDir)) {
+        echo "  - Found API documentation to upload."
+        entries.add([
+            "pattern": "${docsDir}/**/*",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/documentation/${BUILD_NUMBER}/api/",
+            "recursive": "true"
+        ])
+    }
+    
+    // README and changelog
+    def readmeFiles = findFiles(glob: '{README,CHANGELOG,RELEASE_NOTES}.{md,txt}')
+    if (readmeFiles.size() > 0) {
+        echo "  - Found ${readmeFiles.size()} documentation files to upload."
+        entries.add([
+            "pattern": "{README,CHANGELOG,RELEASE_NOTES}.{md,txt}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/documentation/${BUILD_NUMBER}/",
+            "flat": "true"
+        ])
+    }
+    
+    return entries
+}
+
+/**
+ * Alternative method for downloading artifacts with caching.
+ */
+def downloadArtifacts(String downloadSpec) {
+    echo "📥 Downloading artifacts..."
+    try {
+        writeFile file: 'download-spec.json', text: downloadSpec
+        
+        jf "rt dl --spec=download-spec.json " +
+           "--build-name=${JFROG_CLI_BUILD_NAME} " +
+           "--build-number=${JFROG_CLI_BUILD_NUMBER} " +
+           "--detailed-summary"
+           
+        echo "✅ Successfully downloaded artifacts."
+        
+    } catch (Exception e) {
+        echo "❌ Download failed: ${e.getMessage()}"
+        throw e
+    } finally {
+        if (fileExists('download-spec.json')) {
+            sh 'rm -f download-spec.json'
+        }
+    }
+}
+
+/**
+ * Promotes build between repositories (e.g., from staging to production).
+ */
+def promoteBuild(String targetRepo, String status = 'Released') {
+    echo "🚀 Promoting build to ${targetRepo}..."
+    try {
+        jf "rt bpr ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER} " +
+           "${targetRepo} --status='${status}' --copy=true --comment='Promoted by Jenkins'"
+        
+        echo "✅ Build promoted successfully to ${targetRepo}."
+        
+    } catch (Exception e) {
+        echo "❌ Build promotion failed: ${e.getMessage()}"
+        throw e
+    }
 }
 
 
