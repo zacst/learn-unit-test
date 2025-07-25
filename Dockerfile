@@ -37,9 +37,6 @@ RUN wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-p
     rm packages-microsoft-prod.deb && \
     rm -rf /var/lib/apt/lists/*
 
-# Install JFrog CLI (your pipeline expects this to be available)
-RUN curl -fL https://install-cli.jfrog.io | sh
-
 # Switch back to jenkins user
 USER jenkins
 
@@ -52,7 +49,7 @@ RUN echo "=== Base Installation Verification ===" && \
     dotnet --version && \
     python3 --version && \
     pip3 --version && \
-    jf --version && \
-    echo "✅ Base tools ready - pipeline will install additional tools at runtime"
+    semgrep --version && \
+    echo "✅ Base tools ready - Jenkins will provide JFrog CLI via tool configuration"
 
 # Keep the default CMD from jenkins/agent (handles Jenkins remoting)
