@@ -851,37 +851,34 @@ def publishSecurityResults() {
 def uploadArtifacts() {
     echo "📦 Preparing to upload artifacts using best practices..."
     
-    // Validate required environment variables
     if (!validateEnvironment()) {
         return
     }
     
     try {
-        // 1. Verify connection to Artifactory with timeout
         timeout(time: 30, unit: 'SECONDS') {
             jf 'rt ping'
         }
         echo "✅ JFrog Artifactory connection successful."
 
-        // 2. Gather all upload rules from separate helper functions
         def allSpecEntries = []
         allSpecEntries.addAll(getBinarySpecEntries())
         allSpecEntries.addAll(getNugetSpecEntries())
         allSpecEntries.addAll(getReportSpecEntries())
-        allSpecEntries.addAll(getDocumentationSpecEntries()) // Additional artifact type
+        allSpecEntries.addAll(getDocumentationSpecEntries())
 
-        // 3. Proceed only if there are items to upload
-        if (allSpecEntries.size() > 0) {
+        // Safe size check instead of using .size() > 0
+        if (!allSpecEntries.isEmpty()) {
             def spec = [files: allSpecEntries]
             writeFile file: 'upload-spec.json', text: groovy.json.JsonOutput.toJson(spec)
             echo "📝 Generated unified upload spec with ${allSpecEntries.size()} entries"
             
-            // Optional: Show spec in debug mode only
-            if (env.DEBUG_MODE == 'true') {
+            // Safe debug mode check
+            def debugMode = env.getProperty('DEBUG_MODE')
+            if (debugMode == 'true') {
                 sh 'cat upload-spec.json'
             }
 
-            // 4. Execute upload with enhanced options
             def uploadCmd = "rt u --spec=upload-spec.json " +
                           "--build-name=${JFROG_CLI_BUILD_NAME} " +
                           "--build-number=${JFROG_CLI_BUILD_NUMBER} " +
@@ -890,38 +887,30 @@ def uploadArtifacts() {
                           "--threads=3"
             
             jf uploadCmd
-            
-            // 5. Add build properties for better traceability
             addBuildProperties()
-            
-            // 6. Publish build information
             jf "rt bp ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
             
             echo "✅ Successfully uploaded all artifacts and published build info."
             
         } else {
-            echo "⚠️ No artifacts found to upload. This might indicate a build issue."
-            // Consider failing the build if artifacts are expected
-            if (env.FAIL_ON_NO_ARTIFACTS == 'true') {
+            echo "⚠️ No artifacts found to upload."
+            def failOnNoArtifacts = env.getProperty('FAIL_ON_NO_ARTIFACTS')
+            if (failOnNoArtifacts == 'true') {
                 error("No artifacts found but artifacts were expected")
             }
         }
 
     } catch (Exception e) {
         echo "❌ JFrog Artifactory upload failed: ${e.getMessage()}"
-        // More granular error handling
-        if (e.getMessage().contains('connection')) {
-            echo "💡 Consider checking network connectivity and credentials"
-        }
-        currentBuild.result = 'FAILURE' // Changed from UNSTABLE to FAILURE for upload failures
-        throw e // Re-throw to stop pipeline if needed
+        currentBuild.result = 'FAILURE'
+        throw e
     } finally {
-        // Cleanup temporary files
         if (fileExists('upload-spec.json')) {
             sh 'rm -f upload-spec.json'
         }
     }
 }
+
 
 /**
  * Validates required environment variables and configuration.
@@ -935,8 +924,15 @@ def validateEnvironment() {
         'ARTIFACTORY_REPO_REPORTS'
     ]
     
-    def missing = requiredVars.findAll { !env[it] }
-    if (missing) {
+    def missing = []
+    for (String varName : requiredVars) {
+        def value = env.getProperty(varName)
+        if (!value || value.trim().isEmpty()) {
+            missing.add(varName)
+        }
+    }
+    
+    if (missing.size() > 0) {
         echo "❌ Missing required environment variables: ${missing.join(', ')}"
         currentBuild.result = 'FAILURE'
         return false
@@ -948,15 +944,20 @@ def validateEnvironment() {
  * Adds build properties for better traceability and metadata.
  */
 def addBuildProperties() {
+    def gitCommit = env.getProperty('GIT_COMMIT') ?: 'unknown'
+    def gitBranch = env.getProperty('GIT_BRANCH') ?: 'unknown'
+    def jobName = env.getProperty('JOB_NAME') ?: 'unknown'
+    def buildNumber = env.getProperty('BUILD_NUMBER') ?: 'unknown'
+    
     def properties = [
         "build.timestamp=${new Date().format('yyyy-MM-dd HH:mm:ss')}",
-        "git.commit=${env.GIT_COMMIT ?: 'unknown'}",
-        "git.branch=${env.GIT_BRANCH ?: 'unknown'}",
-        "jenkins.job=${env.JOB_NAME}",
-        "jenkins.build=${env.BUILD_NUMBER}"
+        "git.commit=${gitCommit}",
+        "git.branch=${gitBranch}",
+        "jenkins.job=${jobName}",
+        "jenkins.build=${buildNumber}"
     ]
     
-    properties.each { prop ->
+    for (String prop : properties) {
         jf "rt bce ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER} ${prop}"
     }
 }
@@ -1043,41 +1044,31 @@ def validateNugetPackages(files) {
 /**
  * Finds build reports with organized structure.
  */
-def List getReportSpecEntries() {
+def getReportSpecEntries() {
     def entries = []
     def timestamp = new Date().format('yyyy-MM-dd_HH-mm-ss')
     
-    // Test results
-    if (env.TEST_RESULTS_DIR && fileExists(env.TEST_RESULTS_DIR)) {
+    // Safe environment variable access
+    def testResultsDir = env.getProperty('TEST_RESULTS_DIR')
+    if (testResultsDir && fileExists(testResultsDir)) {
         echo "  - Found test results to upload."
         entries.add([
-            "pattern": "${env.TEST_RESULTS_DIR}/**/*.{trx,xml,json}",
+            "pattern": "${testResultsDir}/**/*.{trx,xml,json}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/test-results/${BUILD_NUMBER}_${timestamp}/",
             "recursive": "true",
             "flat": "false"
         ])
     }
     
-    // Coverage reports
-    if (env.COVERAGE_REPORTS_DIR && fileExists(env.COVERAGE_REPORTS_DIR)) {
+    def coverageReportsDir = env.getProperty('COVERAGE_REPORTS_DIR')
+    if (coverageReportsDir && fileExists(coverageReportsDir)) {
         echo "  - Found coverage reports to upload."
         entries.add([
-            "pattern": "${env.COVERAGE_REPORTS_DIR}/**/*",
+            "pattern": "${coverageReportsDir}/**/*",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/coverage/${BUILD_NUMBER}_${timestamp}/",
             "recursive": "true",
             "flat": "false",
             "exclusions": ["**/*.tmp", "**/.git/**"]
-        ])
-    }
-    
-    // Static analysis reports (SonarQube, etc.)
-    def staticAnalysisDir = 'reports/static-analysis'
-    if (fileExists(staticAnalysisDir)) {
-        echo "  - Found static analysis reports to upload."
-        entries.add([
-            "pattern": "${staticAnalysisDir}/**/*",
-            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/static-analysis/${BUILD_NUMBER}_${timestamp}/",
-            "recursive": "true"
         ])
     }
     
