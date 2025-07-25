@@ -18,6 +18,8 @@ pipeline {
     tools {
         // Configure JFrog CLI tool in Jenkins Global Tool Configuration
         jfrog 'jfrog-cli'
+        // Configure SonarQube Scanner in Jenkins Global Tool Configuration
+        sonarQubeScanner 'FOS-SonarScanner'
     }
 
     // =========================================================================
@@ -349,7 +351,8 @@ def runBuildTestAndSast() {
 
     withSonarQubeEnv("${SONARQUBE_ENV}") {
         try {
-            installDotnetTool('dotnet-sonarscanner')
+            // Uncomment if you want to install SonarScanner globally
+            // installDotnetTool('dotnet-sonarscanner')
             
             startSonarScanner()
             buildSolution()
