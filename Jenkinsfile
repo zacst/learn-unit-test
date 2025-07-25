@@ -18,6 +18,8 @@ pipeline {
     tools {
         // Configure JFrog CLI tool in Jenkins Global Tool Configuration
         jfrog 'jfrog-cli'
+        // COnfigure SonarQube Scanner in Jenkins Global Tool Configuration
+        sonarQubeScanner 'FOS-SonarScanner'
     }
 
     // =========================================================================
@@ -39,9 +41,12 @@ pipeline {
         SECRETS_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/secrets"
         DAST_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/dast"
 
-        // --- SonarQube Configuration ---
-        SONARQUBE_URL = "http://${env.host_ip}:9000"
-        SONAR_PROJECT_KEY = 'calculator' // Replace with your SonarQube project key
+        // // --- Manual SonarQube Configuration --- (if needed)
+        // SONARQUBE_URL = "http://${env.host_ip}:9000"
+        // SONAR_PROJECT_KEY = 'calculator' // Replace with your SonarQube project key
+
+        // -- Jenkins-configured SonarQube Server
+        SONARQUBE_ENV = 'FOS-SonarQube'
 
         // --- JFrog Artifactory Configuration ---
         JFROG_CLI_BUILD_NAME = "${JOB_NAME}"
@@ -345,9 +350,9 @@ def runBuildTestAndSast() {
     sh "mkdir -p ${TEST_RESULTS_DIR} ${COVERAGE_REPORTS_DIR}"
 
     withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-        withSonarQubeEnv('sonar-server') {
+        withSonarQubeEnv("${SONARQUBE_ENV}") {
             try {
-                installDotnetTool('dotnet-sonarscanner')
+                // installDotnetTool('dotnet-sonarscanner')
                 
                 startSonarScanner()
                 buildSolution()
