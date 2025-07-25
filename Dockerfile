@@ -19,12 +19,17 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    python3-full \
+    pipx \
     ca-certificates \
     gnupg \
     lsb-release \
     && rm -rf /var/lib/apt/lists/*
 
-# Install .NET SDK 8.0
+# Install Semgrep system-wide to avoid pip user installation issues
+RUN pip3 install --break-system-packages semgrep
+
+# Install .NET SDK 8.0 (to support .NET 8.0 projects)
 RUN wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
     dpkg -i packages-microsoft-prod.deb && \
     apt-get update && \
