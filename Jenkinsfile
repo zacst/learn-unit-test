@@ -40,7 +40,7 @@ pipeline {
         DAST_REPORTS_DIR = "${SECURITY_REPORTS_DIR}/dast"
 
         // --- SonarQube Configuration ---
-        SONARQUBE_URL = "http://${env.host-ip}:9000"
+        SONARQUBE_URL = "http://${env.host_ip}:9000"
         SONAR_PROJECT_KEY = 'calculator' // Replace with your SonarQube project key
 
         // --- JFrog Artifactory Configuration ---
