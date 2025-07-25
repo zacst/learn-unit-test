@@ -397,7 +397,7 @@ def startSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
     sh '''
         export PATH="$PATH:$HOME/.dotnet/tools"
-        dotnet sonarscanner begin \\
+        sonar-scanner begin \\
             /k:"$SONAR_PROJECT_KEY" \\
             /d:sonar.host.url="$SONARQUBE_URL" \\
             /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \\
@@ -488,7 +488,7 @@ def endSonarScanner() {
         echo "🔍 Completing SonarQube analysis..."
         sh '''
             export PATH="$PATH:$HOME/.dotnet/tools"
-            dotnet sonarscanner end
+            sonar-scanner end
         '''
     } catch (Exception e) {
         echo "⚠️ Could not end SonarQube analysis gracefully: ${e.getMessage()}"
