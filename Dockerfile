@@ -1,13 +1,15 @@
-# Minimal Docker image that supports your current pipeline code
-FROM mcr.microsoft.com/dotnet/sdk:6.0-jammy
+# Jenkins Agent for .NET Pipeline (Runtime Tool Installation)
+FROM jenkins/agent:latest
+
+# Switch to root for installations
+USER root
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive \
     DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true \
-    DOTNET_CLI_TELEMETRY_OPTOUT=true \
-    PATH="/root/.dotnet/tools:${PATH}"
+    DOTNET_CLI_TELEMETRY_OPTOUT=true
 
-# Install only essential system dependencies that your pipeline needs
+# Install system dependencies that your pipeline needs
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
@@ -16,29 +18,36 @@ RUN apt-get update && apt-get install -y \
     tar \
     python3 \
     python3-pip \
-    openjdk-11-jdk \
+    python3-venv \
+    ca-certificates \
+    gnupg \
+    lsb-release \
     && rm -rf /var/lib/apt/lists/*
 
-# Install JFrog CLI (it installs directly to /usr/local/bin as 'jf')
+# Install .NET SDK 8.0
+RUN wget https://packages.microsoft.com/config/ubuntu/20.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
+    dpkg -i packages-microsoft-prod.deb && \
+    apt-get update && \
+    apt-get install -y dotnet-sdk-8.0 && \
+    rm packages-microsoft-prod.deb && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install JFrog CLI (your pipeline expects this to be available)
 RUN curl -fL https://install-cli.jfrog.io | sh
 
-# Set working directory (can be before or after user creation)
-WORKDIR /workspace
+# Switch back to jenkins user
+USER jenkins
 
-# Create Jenkins user and set permissions
-RUN groupadd -g 1000 jenkins && \
-    useradd -u 1000 -g jenkins -m -s /bin/bash jenkins && \
-    chown -R jenkins:jenkins /workspace
+# Update PATH to include .NET tools location
+ENV PATH="/home/jenkins/.dotnet/tools:/root/.dotnet/tools:/usr/local/bin:${PATH}"
 
 # Verify basic installations
-RUN echo "=== Base Image Verification ===" && \
+RUN echo "=== Base Installation Verification ===" && \
+    java -version && \
     dotnet --version && \
     python3 --version && \
     pip3 --version && \
     jf --version && \
-    wget --version | head -1 && \
-    echo "✅ Base image ready for runtime installations"
+    echo "✅ Base tools ready - pipeline will install additional tools at runtime"
 
-USER jenkins
-
-CMD ["tail", "-f", "/dev/null"]
+# Keep the default CMD from jenkins/agent (handles Jenkins remoting)

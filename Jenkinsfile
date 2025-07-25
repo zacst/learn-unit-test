@@ -25,7 +25,7 @@ pipeline {
     // =========================================================================
     environment {
         // --- .NET Configuration ---
-        DOTNET_VERSION = '6.0'
+        DOTNET_VERSION = '8.0'
         DOTNET_SKIP_FIRST_TIME_EXPERIENCE = 'true'
         DOTNET_CLI_TELEMETRY_OPTOUT = 'true'
         DOTNET_FORMAT_VERSION = '7.0.400' // Compatible with your SDK
