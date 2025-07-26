@@ -354,7 +354,7 @@ def runBuildTestAndSast() {
             // Uncomment if you want to install SonarScanner globally
             installDotnetTool('dotnet-sonarscanner')
             
-            startSonarScanner()
+            startDotnetSonarScanner()
             buildSolution()
                 sh '''
                     echo "--- Verifying build artifacts ---"
@@ -399,7 +399,7 @@ def installDotnetTool(String toolName, String version = '') {
 def startSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
     sh '''
-        dotnet sonarscanner begin \\
+        sonar-scanner \\
             -Dsonar.projectKey="$SONAR_PROJECT_KEY" \\
             -Dsonar.sources=. \\
             -Dsonar.cs.nunit.reportsPaths="''' + TEST_RESULTS_DIR + '''/*.trx" \\
