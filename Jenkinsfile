@@ -18,8 +18,8 @@ pipeline {
     tools {
         // Configure JFrog CLI tool in Jenkins Global Tool Configuration
         jfrog 'jfrog-cli'
-        // Configure SonarQube Scanner in Jenkins Global Tool Configuration
-        sonarQubeScanner 'FOS-SonarScanner'
+        // // Configure SonarQube Scanner in Jenkins Global Tool Configuration
+        // sonarQubeScanner 'FOS-SonarScanner'
     }
 
     // =========================================================================
@@ -351,8 +351,8 @@ def runBuildTestAndSast() {
 
     withSonarQubeEnv("${SONARQUBE_ENV}") {
         try {
-            // Uncomment if you want to install SonarScanner globally
-            // installDotnetTool('dotnet-sonarscanner')
+            Uncomment if you want to install SonarScanner globally
+            installDotnetTool('dotnet-sonarscanner')
             
             startSonarScanner()
             buildSolution()
@@ -373,8 +373,8 @@ def runBuildTestAndSast() {
                 echo "⚠️ Build marked as unstable due to failures."
             }
         } finally {
-            // // If dotnet-sonarscanner was used
-            // endSonarScanner()
+            // If dotnet-sonarscanner was used
+            endSonarScanner()
         }
     }
 }
@@ -399,7 +399,7 @@ def installDotnetTool(String toolName, String version = '') {
 def startSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
     sh '''
-        sonar-scanner \\
+        dotnet sonarscanner \\
             -Dsonar.projectKey="$SONAR_PROJECT_KEY" \\
             -Dsonar.sources=. \\
             -Dsonar.cs.nunit.reportsPaths="''' + TEST_RESULTS_DIR + '''/*.trx" \\
