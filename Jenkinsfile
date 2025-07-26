@@ -399,7 +399,7 @@ def installDotnetTool(String toolName, String version = '') {
 def startSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
     sh '''
-        dotnet sonarscanner \\
+        dotnet sonarscanner begin \\
             -Dsonar.projectKey="$SONAR_PROJECT_KEY" \\
             -Dsonar.sources=. \\
             -Dsonar.cs.nunit.reportsPaths="''' + TEST_RESULTS_DIR + '''/*.trx" \\
