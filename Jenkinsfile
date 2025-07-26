@@ -12,7 +12,7 @@
 
 pipeline {
     agent {
-        label 'pipeline-agent'
+        label 'ci-agent'
     }
 
     tools {
@@ -373,7 +373,8 @@ def runBuildTestAndSast() {
                 echo "⚠️ Build marked as unstable due to failures."
             }
         } finally {
-            endSonarScanner()
+            // // If dotnet-sonarscanner was used
+            // endSonarScanner()
         }
     }
 }
@@ -393,13 +394,30 @@ def installDotnetTool(String toolName, String version = '') {
 /**
  * Starts the SonarQube scanner.
  */
+
+// If sonar-scanner was used
 def startSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
     sh '''
+        sonar-scanner \\
+            -Dsonar.projectKey="$SONAR_PROJECT_KEY" \\
+            -Dsonar.sources=. \\
+            -Dsonar.cs.nunit.reportsPaths="''' + TEST_RESULTS_DIR + '''/*.trx" \\
+            -Dsonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
+            -Dsonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
+            -Dsonar.test.exclusions="**/*.Tests/**" \\
+            -Dsonar.coverage.exclusions="**/*.Tests/**"
+    '''
+}
+
+ // If dotnet-sonarscanner was used
+def startDotnetSonarScanner() {
+    echo "🔍 Starting SonarQube analysis..."
+    sh '''
         export PATH="$PATH:$HOME/.dotnet/tools"
-        sonar-scanner begin \\
+        dotnet sonarscanner begin \\
             /k:"$SONAR_PROJECT_KEY" \\
-            /d:sonar.host.url="$SONARQUBE_URL" \\
+            /d:sonar.host.url="$SONAR_HOST_URL" \\
             /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \\
             /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
             /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
@@ -483,12 +501,13 @@ def generateCoverageReports() {
 /**
  * Ends the SonarQube scanner analysis.
  */
+ // If dotnet-sonarscanner was used
 def endSonarScanner() {
     try {
         echo "🔍 Completing SonarQube analysis..."
         sh '''
             export PATH="$PATH:$HOME/.dotnet/tools"
-            sonar-scanner end
+            dotnet sonarscanner end
         '''
     } catch (Exception e) {
         echo "⚠️ Could not end SonarQube analysis gracefully: ${e.getMessage()}"
