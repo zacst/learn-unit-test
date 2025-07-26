@@ -351,7 +351,7 @@ def runBuildTestAndSast() {
 
     withSonarQubeEnv("${SONARQUBE_ENV}") {
         try {
-            Uncomment if you want to install SonarScanner globally
+            // Uncomment if you want to install SonarScanner globally
             installDotnetTool('dotnet-sonarscanner')
             
             startSonarScanner()
