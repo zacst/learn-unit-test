@@ -997,9 +997,7 @@ def addBuildProperties() {
     env.JENKINS_JOB_CUSTOM = jobName
     env.JENKINS_BUILD_CUSTOM = buildNumber
     
-    for (String prop : properties) {
-        jf "rt bce ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
-    }
+    jf "rt bce ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
 }
 
 /**
