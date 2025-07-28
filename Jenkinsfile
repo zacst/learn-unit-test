@@ -416,7 +416,7 @@ def startDotnetSonarScanner() {
     sh '''
         export PATH="$PATH:$HOME/.dotnet/tools"
         dotnet sonarscanner begin \\
-            /k:"$SONAR_PROJECT_KEY" \\
+            /key:"$SONAR_PROJECT_KEY" \\
             /d:sonar.host.url="$SONAR_HOST_URL" \\
             /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \\
             /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
