@@ -62,6 +62,11 @@ pipeline {
         SEMGREP_TIMEOUT = '300'
         GITLEAKS_VERSION = '8.18.2'
 
+        // --- Additional Artifact Configuration ---
+        UPLOAD_SOURCE_CODE = false
+        FAIL_ON_NO_ARTIFACTS = false
+        DEBUG_MODE = false
+
         // --- Test Token ---
         // This is a fake GitHub token for testing purposes
         GITHUB_TOKEN = "ghp_1234567890abcdef1234567890abcdef1234"
