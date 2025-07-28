@@ -45,7 +45,7 @@ pipeline {
         // SONARQUBE_URL = "http://${env.host_ip}:9000"
 
         // -- SonarQube Project Key ---
-        SONAR_PROJECT_KEY = 'calculator' // Replace with your SonarQube project key
+        SONAR_PROJECT_KEY = 'CI' // Replace with your SonarQube project key
 
         // -- Jenkins-configured SonarQube Server ---
         SONARQUBE_ENV = 'FOS-SonarQube'
