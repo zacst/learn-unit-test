@@ -63,7 +63,6 @@ pipeline {
         GITLEAKS_VERSION = '8.18.2'
 
         // --- Additional Artifact Configuration ---
-        UPLOAD_SOURCE_CODE = false
         FAIL_ON_NO_ARTIFACTS = false
         DEBUG_MODE = false
 
@@ -98,6 +97,9 @@ pipeline {
         choice(name: 'SECURITY_SCAN_LEVEL', choices: ['BASIC', 'FULL'], description: 'Security scanning depth level')
         booleanParam(name: 'ENABLE_LINTING', defaultValue: true, description: 'Enable .NET code style linting with dotnet-format')
         booleanParam(name: 'ENABLE_SECRETS_SCAN', defaultValue: true, description: 'Enable secrets detection scan with Gitleaks')
+
+        // -- Artifact Upload ---
+        booleanParam(name: 'UPLOAD_SOURCE_CODE', defaultValue: false, description: 'Upload source code into JFrog artifactory')
 
         // --- DAST Parameters (Placeholder) ---
         // booleanParam(name: 'ENABLE_DAST_SCAN', defaultValue: false, description: 'Enable Dynamic Application Security Testing (DAST)')
