@@ -890,7 +890,7 @@ def publishSecurityResults() {
  * It gathers all artifact rules, builds a single File Spec, and runs one upload command.
  */
 def uploadArtifacts() {
-    echo "📦 Preparing to upload artifacts using best practices..."
+    echo "📦 Preparing to upload artifacts using comprehensive best practices..."
     
     if (!validateEnvironment()) {
         return
@@ -907,16 +907,19 @@ def uploadArtifacts() {
         allSpecEntries.addAll(getNugetSpecEntries())
         allSpecEntries.addAll(getReportSpecEntries())
         allSpecEntries.addAll(getDocumentationSpecEntries())
+        allSpecEntries.addAll(getSecurityReportSpecEntries())
+        allSpecEntries.addAll(getSourceCodeSpecEntries())
+        allSpecEntries.addAll(getConfigurationSpecEntries())
+        allSpecEntries.addAll(getBuildArtifactSpecEntries())
+        allSpecEntries.addAll(getContainerImageSpecEntries())
+        allSpecEntries.addAll(getDependencySpecEntries())
 
-        // Safe size check instead of using .size() > 0
         if (!allSpecEntries.isEmpty()) {
             def spec = [files: allSpecEntries]
             writeFile file: 'upload-spec.json', text: groovy.json.JsonOutput.toJson(spec)
             echo "📝 Generated unified upload spec with ${allSpecEntries.size()} entries"
             
-            // Safe debug mode check
-            def debugMode = env.getProperty('DEBUG_MODE')
-            if (debugMode == 'true') {
+            if (env.getProperty('DEBUG_MODE') == 'true') {
                 sh 'cat upload-spec.json'
             }
 
@@ -935,8 +938,7 @@ def uploadArtifacts() {
             
         } else {
             echo "⚠️ No artifacts found to upload."
-            def failOnNoArtifacts = env.getProperty('FAIL_ON_NO_ARTIFACTS')
-            if (failOnNoArtifacts == 'true') {
+            if (env.getProperty('FAIL_ON_NO_ARTIFACTS') == 'true') {
                 error("No artifacts found but artifacts were expected")
             }
         }
@@ -990,26 +992,43 @@ def addBuildProperties() {
     def jobName = env.getProperty('JOB_NAME') ?: 'unknown'
     def buildNumber = env.getProperty('BUILD_NUMBER') ?: 'unknown'
     
-    // Set environment variables
+    // Enhanced environment variables
     env.BUILD_TIMESTAMP = new Date().format('yyyy-MM-dd HH:mm:ss')
+    env.BUILD_TIMESTAMP_EPOCH = System.currentTimeMillis().toString()
     env.GIT_COMMIT_CUSTOM = gitCommit
     env.GIT_BRANCH_CUSTOM = gitBranch
     env.JENKINS_JOB_CUSTOM = jobName
     env.JENKINS_BUILD_CUSTOM = buildNumber
+    env.DOTNET_VERSION_USED = sh(script: 'dotnet --version', returnStdout: true).trim()
+    env.BUILD_USER = env.getProperty('BUILD_USER_ID') ?: 'system'
+    env.BUILD_CAUSE = env.getProperty('BUILD_CAUSE') ?: 'unknown'
+    
+    // Add security scan results metadata
+    if (params.ENABLE_SECURITY_SCAN) {
+        env.SECURITY_SCAN_ENABLED = 'true'
+        env.SECURITY_SCAN_LEVEL = params.SECURITY_SCAN_LEVEL
+    }
+    
+    // Add test results metadata
+    def testResultFiles = findFiles(glob: "${env.TEST_RESULTS_DIR}/*.trx")
+    env.TEST_RESULTS_COUNT = testResultFiles.size().toString()
     
     jf "rt bce ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
 }
 
 /**
- * Finds .NET binaries and returns their File Spec rules with improved patterns.
+ * Enhanced binary artifacts with more comprehensive patterns
  */
 def List getBinarySpecEntries() {
     def entries = []
     
-    // More specific patterns to avoid uploading unnecessary files
+    // More comprehensive binary patterns
     def binaryPatterns = [
-        '**/bin/Release/**/*.{exe,dll,pdb}',
-        '**/bin/Debug/**/*.{exe,dll,pdb}'
+        '**/bin/Release/**/*.{exe,dll,pdb,xml}',
+        '**/bin/Debug/**/*.{exe,dll,pdb,xml}',
+        '**/publish/**/*.{exe,dll,pdb,xml,json,config}',
+        '**/out/**/*.{exe,dll,pdb}',
+        '**/dist/**/*.{exe,dll,pdb}'
     ]
     
     binaryPatterns.each { pattern ->
@@ -1017,15 +1036,16 @@ def List getBinarySpecEntries() {
         if (binaryFiles.size() > 0) {
             echo "  - Found ${binaryFiles.size()} binaries matching: ${pattern}"
             
-            // Separate Release and Debug uploads with different retention
-            def config = pattern.contains('Release') ? 'release' : 'debug'
+            def config = pattern.contains('Release') ? 'release' : 
+                        pattern.contains('Debug') ? 'debug' : 
+                        pattern.contains('publish') ? 'published' : 'other'
             
             entries.add([
                 "pattern": pattern,
                 "target": "${ARTIFACTORY_REPO_BINARIES}/${JOB_NAME}/${BUILD_NUMBER}/${config}/",
                 "recursive": "true",
                 "flat": "false",
-                "exclusions": ["**/*.tmp", "**/*.log", "**/obj/**"] // Exclude unwanted files
+                "exclusions": ["**/*.tmp", "**/*.log", "**/obj/**", "**/*.cache"]
             ])
         }
     }
@@ -1034,70 +1054,70 @@ def List getBinarySpecEntries() {
 }
 
 /**
- * Finds NuGet packages with version validation.
+ * Enhanced NuGet packages with symbols and source packages
  */
 def List getNugetSpecEntries() {
     def entries = []
-    def nugetFiles = findFiles(glob: '**/bin/**/*.nupkg')
     
+    // Regular NuGet packages
+    def nugetFiles = findFiles(glob: '**/bin/**/*.nupkg')
     if (nugetFiles.size() > 0) {
         echo "  - Found ${nugetFiles.size()} NuGet packages to upload."
-        
-        // Validate package versions if needed
         validateNugetPackages(nugetFiles)
         
         entries.add([
             "pattern": "**/bin/**/*.nupkg",
-            "target": "${ARTIFACTORY_REPO_NUGET}/",
-            "flat": "true",
-            "exclusions": ["**/*.symbols.nupkg"] // Handle symbols packages separately if needed
+            "target": "${ARTIFACTORY_REPO_NUGET}/packages/",
+            "flat": "false",
+            "exclusions": ["**/*.symbols.nupkg", "**/*.snupkg"]
         ])
-        
-        // Optional: Handle symbol packages separately
-        def symbolFiles = findFiles(glob: '**/bin/**/*.symbols.nupkg')
-        if (symbolFiles.size() > 0) {
-            echo "  - Found ${symbolFiles.size()} symbol packages to upload."
-            entries.add([
-                "pattern": "**/bin/**/*.symbols.nupkg",
-                "target": "${ARTIFACTORY_REPO_NUGET}/symbols/",
-                "flat": "true"
-            ])
-        }
+    }
+    
+    // Symbol packages (.symbols.nupkg)
+    def symbolFiles = findFiles(glob: '**/bin/**/*.symbols.nupkg')
+    if (symbolFiles.size() > 0) {
+        echo "  - Found ${symbolFiles.size()} symbol packages to upload."
+        entries.add([
+            "pattern": "**/bin/**/*.symbols.nupkg",
+            "target": "${ARTIFACTORY_REPO_NUGET}/symbols/",
+            "flat": "false"
+        ])
+    }
+    
+    // Portable symbol packages (.snupkg)
+    def portableSymbolFiles = findFiles(glob: '**/bin/**/*.snupkg')
+    if (portableSymbolFiles.size() > 0) {
+        echo "  - Found ${portableSymbolFiles.size()} portable symbol packages to upload."
+        entries.add([
+            "pattern": "**/bin/**/*.snupkg",
+            "target": "${ARTIFACTORY_REPO_NUGET}/portable-symbols/",
+            "flat": "false"
+        ])
     }
     
     return entries
 }
 
 /**
- * Validates NuGet package versions and names.
- */
-def validateNugetPackages(files) {
-    files.each { file ->
-        if (file.name.contains(' ') || file.name.contains('..')) {
-            echo "⚠️ Potentially invalid package name: ${file.name}"
-        }
-    }
-}
-
-/**
- * Finds build reports with organized structure.
+ * Enhanced reports including all test and analysis reports
  */
 def getReportSpecEntries() {
     def entries = []
     def timestamp = new Date().format('yyyy-MM-dd_HH-mm-ss')
     
-    // Safe environment variable access
+    // Test results
     def testResultsDir = env.getProperty('TEST_RESULTS_DIR')
     if (testResultsDir && fileExists(testResultsDir)) {
         echo "  - Found test results to upload."
         entries.add([
-            "pattern": "${testResultsDir}/**/*.{trx,xml,json}",
+            "pattern": "${testResultsDir}/**/*.{trx,xml,json,html}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/test-results/${BUILD_NUMBER}_${timestamp}/",
             "recursive": "true",
             "flat": "false"
         ])
     }
     
+    // Coverage reports
     def coverageReportsDir = env.getProperty('COVERAGE_REPORTS_DIR')
     if (coverageReportsDir && fileExists(coverageReportsDir)) {
         echo "  - Found coverage reports to upload."
@@ -1110,80 +1130,234 @@ def getReportSpecEntries() {
         ])
     }
     
+    // Linting reports
+    def linterReportsDir = env.getProperty('LINTER_REPORTS_DIR')
+    if (linterReportsDir && fileExists(linterReportsDir)) {
+        echo "  - Found linting reports to upload."
+        entries.add([
+            "pattern": "${linterReportsDir}/**/*.{json,xml,sarif}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/linting/${BUILD_NUMBER}_${timestamp}/",
+            "recursive": "true",
+            "flat": "false"
+        ])
+    }
+    
+    // SonarQube reports (if available)
+    def sonarReports = findFiles(glob: '.sonar/**/*')
+    if (sonarReports.size() > 0) {
+        echo "  - Found SonarQube analysis files to upload."
+        entries.add([
+            "pattern": ".sonar/**/*",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/sonar/${BUILD_NUMBER}_${timestamp}/",
+            "recursive": "true",
+            "flat": "false",
+            "exclusions": ["**/.git/**", "**/cache/**"]
+        ])
+    }
+    
     return entries
 }
 
 /**
- * Finds documentation artifacts.
+ * Security reports upload
  */
-def List getDocumentationSpecEntries() {
+def List getSecurityReportSpecEntries() {
     def entries = []
+    def timestamp = new Date().format('yyyy-MM-dd_HH-mm-ss')
     
-    // API documentation
-    def docsDir = 'docs/api'
-    if (fileExists(docsDir)) {
-        echo "  - Found API documentation to upload."
+    def securityReportsDir = env.getProperty('SECURITY_REPORTS_DIR')
+    if (securityReportsDir && fileExists(securityReportsDir)) {
+        echo "  - Found security reports to upload."
         entries.add([
-            "pattern": "${docsDir}/**/*",
-            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/documentation/${BUILD_NUMBER}/api/",
-            "recursive": "true"
+            "pattern": "${securityReportsDir}/**/*.{sarif,json,xml,html,txt}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/security/${BUILD_NUMBER}_${timestamp}/",
+            "recursive": "true",
+            "flat": "false"
         ])
     }
     
-    // README and changelog
-    def readmeFiles = findFiles(glob: '{README,CHANGELOG,RELEASE_NOTES}.{md,txt}')
-    if (readmeFiles.size() > 0) {
-        echo "  - Found ${readmeFiles.size()} documentation files to upload."
+    return entries
+}
+
+/**
+ * Source code and project files
+ */
+def List getSourceCodeSpecEntries() {
+    def entries = []
+    
+    // Only upload source if specifically requested
+    if (params.getProperty('UPLOAD_SOURCE_CODE') == true) {
+        echo "  - Preparing source code for upload."
         entries.add([
-            "pattern": "{README,CHANGELOG,RELEASE_NOTES}.{md,txt}",
-            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/documentation/${BUILD_NUMBER}/",
+            "pattern": "**/*.{cs,csproj,sln,config,json,xml}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/source/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false",
+            "exclusions": [
+                "**/bin/**", "**/obj/**", "**/.git/**", 
+                "**/packages/**", "**/node_modules/**",
+                "**/*.tmp", "**/*.log", "**/.vs/**"
+            ]
+        ])
+    }
+    
+    return entries
+}
+
+/**
+ * Configuration files and deployment scripts
+ */
+def List getConfigurationSpecEntries() {
+    def entries = []
+    
+    // Configuration files
+    def configFiles = findFiles(glob: '**/*.{config,settings,properties,yaml,yml,json}')
+    def deploymentConfigs = configFiles.findAll { file ->
+        file.path.contains('config') || 
+        file.path.contains('deploy') || 
+        file.path.contains('environment') ||
+        file.name.toLowerCase().contains('appsettings')
+    }
+    
+    if (deploymentConfigs.size() > 0) {
+        echo "  - Found ${deploymentConfigs.size()} configuration files to upload."
+        entries.add([
+            "pattern": "**/{appsettings,web,app}.{config,json,xml}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/configs/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false",
+            "exclusions": ["**/bin/**", "**/obj/**"]
+        ])
+    }
+    
+    // Deployment scripts
+    def scriptFiles = findFiles(glob: '**/*.{ps1,sh,bat,cmd}')
+    if (scriptFiles.size() > 0) {
+        echo "  - Found ${scriptFiles.size()} script files to upload."
+        entries.add([
+            "pattern": "**/*.{ps1,sh,bat,cmd}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/scripts/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false",
+            "exclusions": ["**/node_modules/**", "**/.git/**"]
+        ])
+    }
+    
+    return entries
+}
+
+/**
+ * Build artifacts and metadata
+ */
+def List getBuildArtifactSpecEntries() {
+    def entries = []
+    
+    // Build logs and metadata
+    if (fileExists('build.log')) {
+        entries.add([
+            "pattern": "build.log",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/build-logs/${BUILD_NUMBER}/",
             "flat": "true"
         ])
     }
     
+    // MSBuild logs
+    def msbuildLogs = findFiles(glob: '**/msbuild*.log')
+    if (msbuildLogs.size() > 0) {
+        echo "  - Found ${msbuildLogs.size()} MSBuild log files to upload."
+        entries.add([
+            "pattern": "**/msbuild*.log",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/msbuild-logs/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false"
+        ])
+    }
+    
+    // Dependency lock files
+    def lockFiles = findFiles(glob: '**/packages.lock.json') + 
+                   findFiles(glob: '**/project.lock.json') +
+                   findFiles(glob: '**/project.assets.json')
+    if (lockFiles.size() > 0) {
+        echo "  - Found ${lockFiles.size()} dependency lock files to upload."
+        entries.add([
+            "pattern": "**/{packages.lock.json,project.lock.json,project.assets.json}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/dependencies/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false"
+        ])
+    }
+    
     return entries
 }
 
 /**
- * Alternative method for downloading artifacts with caching.
+ * Container images and Docker files
  */
-def downloadArtifacts(String downloadSpec) {
-    echo "📥 Downloading artifacts..."
-    try {
-        writeFile file: 'download-spec.json', text: downloadSpec
-        
-        jf "rt dl --spec=download-spec.json " +
-           "--build-name=${JFROG_CLI_BUILD_NAME} " +
-           "--build-number=${JFROG_CLI_BUILD_NUMBER} " +
-           "--detailed-summary"
-           
-        echo "✅ Successfully downloaded artifacts."
-        
-    } catch (Exception e) {
-        echo "❌ Download failed: ${e.getMessage()}"
-        throw e
-    } finally {
-        if (fileExists('download-spec.json')) {
-            sh 'rm -f download-spec.json'
-        }
+def List getContainerImageSpecEntries() {
+    def entries = []
+    
+    // Dockerfile and related files
+    def dockerFiles = findFiles(glob: '**/Dockerfile*') + 
+                     findFiles(glob: '**/.dockerignore') +
+                     findFiles(glob: '**/docker-compose*.{yml,yaml}')
+    if (dockerFiles.size() > 0) {
+        echo "  - Found ${dockerFiles.size()} Docker-related files to upload."
+        entries.add([
+            "pattern": "**/Dockerfile*",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/docker/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false"
+        ])
+        entries.add([
+            "pattern": "**/.dockerignore",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/docker/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false"
+        ])
+        entries.add([
+            "pattern": "**/docker-compose*.{yml,yaml}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/docker/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false"
+        ])
     }
+    
+    return entries
 }
 
 /**
- * Promotes build between repositories (e.g., from staging to production).
+ * Dependency reports and license information
  */
-def promoteBuild(String targetRepo, String status = 'Released') {
-    echo "🚀 Promoting build to ${targetRepo}..."
-    try {
-        jf "rt bpr ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER} " +
-           "${targetRepo} --status='${status}' --copy=true --comment='Promoted by Jenkins'"
-        
-        echo "✅ Build promoted successfully to ${targetRepo}."
-        
-    } catch (Exception e) {
-        echo "❌ Build promotion failed: ${e.getMessage()}"
-        throw e
+def List getDependencySpecEntries() {
+    def entries = []
+    
+    // NuGet packages.config files
+    def packagesConfigs = findFiles(glob: '**/packages.config')
+    if (packagesConfigs.size() > 0) {
+        echo "  - Found ${packagesConfigs.size()} packages.config files to upload."
+        entries.add([
+            "pattern": "**/packages.config",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/package-configs/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false"
+        ])
     }
+    
+    // License files
+    def licenseFiles = findFiles(glob: '**/LICENSE*') + 
+                      findFiles(glob: '**/NOTICE*') +
+                      findFiles(glob: '**/THIRD-PARTY*')
+    if (licenseFiles.size() > 0) {
+        echo "  - Found ${licenseFiles.size()} license files to upload."
+        entries.add([
+            "pattern": "**/{LICENSE,NOTICE,THIRD-PARTY}*",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/licenses/${BUILD_NUMBER}/",
+            "recursive": "true",
+            "flat": "false"
+        ])
+    }
+    
+    return entries
 }
 
 
