@@ -990,16 +990,15 @@ def addBuildProperties() {
     def jobName = env.getProperty('JOB_NAME') ?: 'unknown'
     def buildNumber = env.getProperty('BUILD_NUMBER') ?: 'unknown'
     
-    def properties = [
-        "build.timestamp=${new Date().format('yyyy-MM-dd HH:mm:ss')}",
-        "git.commit=${gitCommit}",
-        "git.branch=${gitBranch}",
-        "jenkins.job=${jobName}",
-        "jenkins.build=${buildNumber}"
-    ]
+    // Set environment variables
+    env.BUILD_TIMESTAMP = new Date().format('yyyy-MM-dd HH:mm:ss')
+    env.GIT_COMMIT_CUSTOM = gitCommit
+    env.GIT_BRANCH_CUSTOM = gitBranch
+    env.JENKINS_JOB_CUSTOM = jobName
+    env.JENKINS_BUILD_CUSTOM = buildNumber
     
     for (String prop : properties) {
-        jf "rt bce ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER} ${prop}"
+        jf "rt bce ${JFROG_CLI_BUILD_NAME} ${JFROG_CLI_BUILD_NUMBER}"
     }
 }
 
