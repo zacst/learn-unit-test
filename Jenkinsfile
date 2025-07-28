@@ -61,7 +61,6 @@ pipeline {
         DEPENDENCY_CHECK_VERSION = '9.2.0'
         SEMGREP_TIMEOUT = '300'
         GITLEAKS_VERSION = '8.18.2'
-        LICENSE_CHECKER_VERSION = '3.0.0'
 
         // --- Test Token ---
         // This is a fake GitHub token for testing purposes
