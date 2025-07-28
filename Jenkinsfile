@@ -376,7 +376,7 @@ def runBuildTestAndSast() {
             }
         } finally {
             // If dotnet-sonarscanner was used
-            endSonarScanner()
+            endDotnetSonarScanner()
         }
     }
 }
@@ -504,7 +504,8 @@ def generateCoverageReports() {
 /**
  * Ends the SonarQube scanner analysis.
  */
- // If dotnet-sonarscanner was used
+
+ // If sonar scanner was used
 def endSonarScanner() {
     try {
         echo "🔍 Completing SonarQube analysis..."
@@ -516,6 +517,20 @@ def endSonarScanner() {
         echo "⚠️ Could not end SonarQube analysis gracefully: ${e.getMessage()}"
     }
 }
+
+// If dotnet-sonarscanner was used
+def endDotnetSonarScanner() {
+    try {
+        echo "🔍 Completing SonarQube analysis..."
+        sh '''
+            export PATH="$PATH:$HOME/.dotnet/tools"
+            dotnet sonarscanner end /d:sonar.login=$SONAR_AUTH_TOKEN
+        '''
+    } catch (Exception e) {
+        echo "⚠️ Could not end SonarQube analysis gracefully: ${e.getMessage()}"
+    }
+}
+
 
 //---------------------------------
 // Security Scan Helpers
