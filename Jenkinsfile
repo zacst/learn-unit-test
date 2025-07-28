@@ -1222,7 +1222,7 @@ def List getSourceCodeSpecEntries() {
     def entries = []
     
     // Only upload source if specifically requested
-    if (params.getProperty('UPLOAD_SOURCE_CODE') == true) {
+    if (params.UPLOAD_SOURCE_CODE == true) {
         echo "  - Preparing source code for upload."
         entries.add([
             "pattern": "**/*.{cs,csproj,sln,config,json,xml}",
