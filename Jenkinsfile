@@ -43,7 +43,9 @@ pipeline {
 
         // // --- Manual SonarQube Configuration --- (if needed)
         // SONARQUBE_URL = "http://${env.host_ip}:9000"
-        // SONAR_PROJECT_KEY = 'calculator' // Replace with your SonarQube project key
+
+        // -- SonarQube Project Key ---
+        SONAR_PROJECT_KEY = 'calculator' // Replace with your SonarQube project key
 
         // -- Jenkins-configured SonarQube Server ---
         SONARQUBE_ENV = 'FOS-SonarQube'
@@ -413,17 +415,18 @@ def startSonarScanner() {
  // If dotnet-sonarscanner was used
 def startDotnetSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
-    sh '''
-        export PATH="$PATH:$HOME/.dotnet/tools"
+    sh """
+        export PATH="\$PATH:\$HOME/.dotnet/tools"
         dotnet sonarscanner begin \\
-            /key:"$SONAR_PROJECT_KEY" \\
-            /d:sonar.host.url="$SONAR_HOST_URL" \\
-            /d:sonar.cs.nunit.reportsPaths="$TEST_RESULTS_DIR/*.trx" \\
+            /key:"\$SONAR_PROJECT_KEY" \\
+            /d:sonar.host.url="\$SONAR_HOST_URL" \\
+            /d:sonar.login="\$SONAR_AUTH_TOKEN" \\
+            /d:sonar.cs.nunit.reportsPaths="\$TEST_RESULTS_DIR/*.trx" \\
             /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
             /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
             /d:sonar.test.exclusions="**/*.Tests/**" \\
             /d:sonar.coverage.exclusions="**/*.Tests/**"
-    '''
+    """
 }
 
 /**
