@@ -91,10 +91,9 @@ pipeline {
         // --- Security Scans ---
         booleanParam(name: 'ENABLE_SECURITY_SCAN', defaultValue: true, description: 'Enable comprehensive security scanning')
         booleanParam(name: 'FAIL_ON_SECURITY_ISSUES', defaultValue: false, description: 'Fail build on critical security vulnerabilities')
-        choice(name: 'SECURITY_SCAN_LEVEL', choices: ['BASIC', 'COMPREHENSIVE', 'FULL'], description: 'Security scanning depth level')
+        choice(name: 'SECURITY_SCAN_LEVEL', choices: ['BASIC', 'FULL'], description: 'Security scanning depth level')
         booleanParam(name: 'ENABLE_LINTING', defaultValue: true, description: 'Enable .NET code style linting with dotnet-format')
         booleanParam(name: 'ENABLE_SECRETS_SCAN', defaultValue: true, description: 'Enable secrets detection scan with Gitleaks')
-        booleanParam(name: 'ENABLE_LICENSE_CHECK', defaultValue: true, description: 'Enable dependency license compliance check')
 
         // --- DAST Parameters (Placeholder) ---
         // booleanParam(name: 'ENABLE_DAST_SCAN', defaultValue: false, description: 'Enable Dynamic Application Security Testing (DAST)')
@@ -192,7 +191,7 @@ pipeline {
         }
         
         stage('Container Security Scan (Trivy)') {
-            when { expression { params.SECURITY_SCAN_LEVEL in ['COMPREHENSIVE', 'FULL'] } }
+            when { expression { params.SECURITY_SCAN_LEVEL in ['FULL'] } }
             steps {
                 script {
                     runTrivyContainerScan()
@@ -544,7 +543,7 @@ def runSemgrepScan() {
     try {
         sh "mkdir -p ${SECURITY_REPORTS_DIR}/semgrep"
         installSemgrep()
-        def semgrepRules = (params.SECURITY_SCAN_LEVEL in ['COMPREHENSIVE', 'FULL']) ?
+        def semgrepRules = (params.SECURITY_SCAN_LEVEL in ['FULL']) ?
             '--config=auto --config=p/cwe-top-25 --config=p/owasp-top-10' :
             '--config=auto'
 
