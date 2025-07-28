@@ -1157,6 +1157,37 @@ def getReportSpecEntries() {
 }
 
 /**
+ * Finds documentation artifacts.
+ */
+def List getDocumentationSpecEntries() {
+    def entries = []
+    
+    // API documentation
+    def docsDir = 'docs/api'
+    if (fileExists(docsDir)) {
+        echo "  - Found API documentation to upload."
+        entries.add([
+            "pattern": "${docsDir}/**/*",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/documentation/${BUILD_NUMBER}/api/",
+            "recursive": "true"
+        ])
+    }
+    
+    // README and changelog
+    def readmeFiles = findFiles(glob: '{README,CHANGELOG,RELEASE_NOTES}.{md,txt}')
+    if (readmeFiles.size() > 0) {
+        echo "  - Found ${readmeFiles.size()} documentation files to upload."
+        entries.add([
+            "pattern": "{README,CHANGELOG,RELEASE_NOTES}.{md,txt}",
+            "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/documentation/${BUILD_NUMBER}/",
+            "flat": "true"
+        ])
+    }
+    
+    return entries
+}
+
+/**
  * Security reports upload
  */
 def List getSecurityReportSpecEntries() {
