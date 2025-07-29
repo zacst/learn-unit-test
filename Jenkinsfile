@@ -100,6 +100,7 @@ pipeline {
 
         // -- Artifact Upload ---
         booleanParam(name: 'UPLOAD_SOURCE_CODE', defaultValue: false, description: 'Upload source code into JFrog artifactory')
+        booleanParam(name: 'CREATE_DEPLOYMENT_PACKAGE', defaultValue: true, description: 'Create and upload the final app.zip deployment package')
 
         // --- DAST Parameters (Placeholder) ---
         // booleanParam(name: 'ENABLE_DAST_SCAN', defaultValue: false, description: 'Enable Dynamic Application Security Testing (DAST)')
@@ -209,6 +210,15 @@ pipeline {
             steps {
                 script {
                     evaluateQualityGate()
+                }
+            }
+        }
+
+        stage('Package for Deployment') {
+            when { expression { params.CREATE_DEPLOYMENT_PACKAGE } }
+            steps {
+                script {
+                    packageForDeployment()
                 }
             }
         }
@@ -534,6 +544,21 @@ def endDotnetSonarScanner() {
     } catch (Exception e) {
         echo "⚠️ Could not end SonarQube analysis gracefully: ${e.getMessage()}"
     }
+}
+
+/**
+ * Creates the final deployment package by publishing and zipping the application.
+ */
+def packageForDeployment() {
+    echo "📦 Creating deployment package..."
+
+    // Publish the final, runnable artifacts to the 'publish' directory
+    sh "dotnet publish --configuration Release --output ./publish"
+
+    // Zip the contents of the 'publish' directory into app.zip
+    sh "cd publish && zip -r ../app.zip . && cd .."
+
+    echo "✅ Created deployment package: app.zip"
 }
 
 
@@ -908,6 +933,7 @@ def uploadArtifacts() {
         echo "✅ JFrog Artifactory connection successful."
 
         def allSpecEntries = []
+        allSpecEntries.addAll(getDeploymentPackageSpecEntries())
         allSpecEntries.addAll(getBinarySpecEntries())
         allSpecEntries.addAll(getNugetSpecEntries())
         allSpecEntries.addAll(getReportSpecEntries())
@@ -1390,6 +1416,25 @@ def List getDependencySpecEntries() {
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/licenses/${BUILD_NUMBER}/",
             "recursive": "true",
             "flat": "false"
+        ])
+    }
+    
+    return entries
+}
+
+/**
+ * Finds the final deployment package (app.zip) for upload.
+ */
+def List getDeploymentPackageSpecEntries() {
+    def entries = []
+
+    if (fileExists('app.zip')) {
+        echo "  - Found deployment package 'app.zip' to upload."
+        entries.add([
+            "pattern": "app.zip",
+            "target": "${ARTIFACTORY_REPO_BINARIES}/${JOB_NAME}/${BUILD_NUMBER}/app.zip",
+            "recursive": "false",
+            "flat": "true" // Keep the filename as is in the target directory
         ])
     }
     
