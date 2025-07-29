@@ -344,11 +344,14 @@ def setupDotnet() {
  */
 def restoreDependencies() {
     echo "📦 Restoring .NET dependencies..."
-    def solutionFiles = findFiles(glob: '**/*.sln')
-    if (solutionFiles) {
-        solutionFiles.each { sln ->
-            sh "dotnet restore '${sln.path}' --verbosity ${env.DOTNET_VERBOSITY}"
-        }
+    if (!env.NUNIT_PROJECTS) {
+        echo "⚠️ No NUnit test project found to restore."
+        return
+    }
+    // Use the environment variable directly
+    def projectPath = env.NUNIT_PROJECTS
+    if (projectPath) {
+        sh "dotnet restore '${projectPath}' --verbosity ${env.DOTNET_VERBOSITY}"
     } else {
         echo "⚠️ No solution file found. Running restore on the current directory."
         sh "dotnet restore --verbosity ${env.DOTNET_VERBOSITY}"
@@ -373,11 +376,6 @@ def runBuildTestAndSast() {
             
             startDotnetSonarScanner()
             buildSolution()
-                sh '''
-                    echo "--- Verifying build artifacts ---"
-                    ls -Rla
-                    echo "---------------------------------"
-                '''
             runNunitTests()
             generateCoverageReports()
 
@@ -449,12 +447,15 @@ def startDotnetSonarScanner() {
  */
 def buildSolution() {
     echo "🔨 Building .NET solution..."
-    def solutionFiles = findFiles(glob: '**/*.sln')
-    if (solutionFiles) {
-        solutionFiles.each { sln ->
-            echo "🔨 Building solution: ${sln.path}"
-            sh "dotnet build '${sln.path}' --configuration Release --no-restore --verbosity ${env.DOTNET_VERBOSITY}"
-        }
+    if (!env.NUNIT_PROJECTS) {
+        echo "⚠️ No NUnit test project found to restore."
+        return
+    }
+    // Use the environment variable directly
+    def projectPath = env.NUNIT_PROJECTS
+    if (projectPath) {
+        echo "🔨 Building solution: ${projectPath}"
+        sh "dotnet build '${projectPath}' --configuration Release --no-restore --verbosity ${env.DOTNET_VERBOSITY}"
     } else {
         echo "🔨 No solution files found, building all projects..."
         sh "dotnet build --configuration Release --no-restore --verbosity ${env.DOTNET_VERBOSITY}"
@@ -471,25 +472,22 @@ def runNunitTests() {
     }
 
     echo "🧪 Running NUnit tests..."
-    def nunitProjectsList = env.NUNIT_PROJECTS.split(',').findAll { it.trim() }
+    def projectPath = env.NUNIT_PROJECTS
     def coverageArg = params.GENERATE_COVERAGE ? '--collect:"XPlat Code Coverage"' : ''
 
-    nunitProjectsList.each { project ->
-        project = project.trim()
-        if (project) {
-            echo "🧪 Running tests in: ${project}"
-            def projectName = project.split('/')[-1].replace('.csproj', '')
-            sh """
-                dotnet test '${project}' \\
-                    --configuration Release \\
-                    --no-build \\
-                    --logger "trx;LogFileName=nunit-results-${projectName}.trx" \\
-                    --results-directory ${TEST_RESULTS_DIR} \\
-                    ${coverageArg} \\
-                    -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura \\
-                    --verbosity ${env.DOTNET_VERBOSITY}
-            """
-        }
+    if (projectPath) {
+        echo "🧪 Running tests in: ${projectPath}"
+        def projectName = projectPath.split('/')[-1].replace('.csproj', '')
+        sh """
+            dotnet test '${projectPath}' \\
+                --configuration Release \\
+                --no-build \\
+                --logger "trx;LogFileName=nunit-results-${projectName}.trx" \\
+                --results-directory ${TEST_RESULTS_DIR} \\
+                ${coverageArg} \\
+                -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura \\
+                --verbosity ${env.DOTNET_VERBOSITY}
+        """
     }
 }
 
@@ -552,8 +550,16 @@ def endDotnetSonarScanner() {
 def packageForDeployment() {
     echo "📦 Creating deployment package..."
 
+    // Find the solution (.sln) file in the workspace
+    if (!env.NUNIT_PROJECTS) {
+        error "❌ Main solution path not set. Cannot run linter."
+    }
+
+    def projectPath = env.NUNIT_PROJECTS
+    echo "🎯 Found solution file to publish: ${projectPath}"
+
     // Publish the final, runnable artifacts to the 'publish' directory
-    sh "dotnet publish --configuration Release --output ./publish"
+    sh "dotnet publish '${projectPath}' --configuration Release --output ./publish"
 
     // Zip the contents of the 'publish' directory into app.zip
     sh "cd publish && zip -r ../app.zip . && cd .."
@@ -679,17 +685,17 @@ def runLinting() {
     def lintingStatus = 'SUCCESS'
     try {
         sh "mkdir -p ${LINTER_REPORTS_DIR}"
-        def solutionFile = findFiles(glob: '**/*.sln')
-        if (solutionFile.size() == 0) {
-            error "❌ Could not find a solution file (.sln) to lint."
+        if (!env.NUNIT_PROJECTS) {
+            error "❌ Main solution path not set. Cannot run linter."
         }
 
         installDotnetTool('dotnet-format', env.DOTNET_FORMAT_VERSION)
 
+        def projectPath = env.NUNIT_PROJECTS
         def formatResult = sh(
             script: """
                 export PATH="\$PATH:\$HOME/.dotnet/tools"
-                dotnet format '${solutionFile[0].path}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format.json --verbosity diagnostic
+                dotnet format '${projectPath}' --verify-no-changes --report ${LINTER_REPORTS_DIR}/dotnet-format.json --verbosity diagnostic
             """,
             returnStatus: true
         )
@@ -795,32 +801,37 @@ def convertDotnetFormatToSarif(List jsonReport) {
 //---------------------------------
 
 /**
- * Discovers NUnit test projects in the workspace.
+ * Discovers a single NUnit test project and sets its path as an environment variable.
  */
 def discoverTestProjects() {
-    echo "🔍 Discovering NUnit test projects..."
+    echo "🔍 Discovering single NUnit test project..."
+    
+    // findNunitProjects() returns a list with either zero or one project path.
     def nunitProjectsList = findNunitProjects()
+    def finalProjectPath = ''
 
-    if (nunitProjectsList.isEmpty()) {
-        echo "⚠️ No NUnit projects discovered automatically. Using fallback."
-        def fallbackProjects = env.FALLBACK_NUNIT_PROJECTS ?: './csharp-nunit/Calculator.Tests/Calculator.Tests.csproj'
-        nunitProjectsList = fallbackProjects.split(',').findAll { proj ->
-            if (fileExists(proj.trim())) {
-                return true
-            } else {
-                echo "❌ Fallback project not found: ${proj.trim()}"
-                return false
-            }
+    if (!nunitProjectsList.isEmpty()) {
+        // A project was found automatically.
+        finalProjectPath = nunitProjectsList[0]
+    } else {
+        // If no project was found, check the fallback environment variable.
+        echo "⚠️ No NUnit project discovered automatically. Using fallback."
+        def fallbackProject = env.FALLBACK_NUNIT_PROJECTS ?: ''
+        
+        if (fallbackProject && fileExists(fallbackProject.trim())) {
+            finalProjectPath = fallbackProject.trim()
+        } else if (fallbackProject) {
+            echo "❌ Fallback project not found: ${fallbackProject}"
         }
     }
 
-    if (nunitProjectsList.isEmpty()) {
-        error("❌ No valid NUnit test projects found, and no valid fallback projects available.")
+    // Final check: if a project was found (either automatically or via fallback), set it.
+    if (finalProjectPath) {
+        env.NUNIT_PROJECTS = finalProjectPath
+        echo "🎯 NUnit project set to: ${env.NUNIT_PROJECTS}"
+    } else {
+        error("❌ No valid NUnit test project found, and no valid fallback project available.")
     }
-
-    env.NUNIT_PROJECTS = nunitProjectsList.join(',')
-    echo "🎯 Final NUnit projects (${nunitProjectsList.size()}):"
-    nunitProjectsList.each { project -> echo "   → ${project}" }
 }
 
 /**
@@ -828,16 +839,22 @@ def discoverTestProjects() {
  */
 def findNunitProjects() {
     def csprojFiles = findFiles(glob: '**/*Tests/*.csproj') + findFiles(glob: '**/*.Test.csproj')
-    def nunitProjects = []
 
-    csprojFiles.each { projectFile ->
+    // Find the first project file that contains the required NUnit package references
+    def firstNunitProject = csprojFiles.find { projectFile ->
         def projectContent = readFile(projectFile.path)
-        if (projectContent.contains('NUnit') && projectContent.contains('Microsoft.NET.Test.Sdk')) {
-            echo "✅ NUnit project detected: ${projectFile.path}"
-            nunitProjects.add(projectFile.path)
-        }
+        // Return true for the first item that satisfies the condition
+        return projectContent.contains('NUnit') && projectContent.contains('Microsoft.NET.Test.Sdk')
     }
-    return nunitProjects
+
+    if (firstNunitProject) {
+        echo "✅ First NUnit project detected and selected: ${firstNunitProject.path}"
+        // Return a list containing only the path of the first matching project
+        return [firstNunitProject.path]
+    } else {
+        // Return an empty list if no NUnit projects were found
+        return []
+    }
 }
 
 
