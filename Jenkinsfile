@@ -550,7 +550,7 @@ def endDotnetSonarScanner() {
 def packageForDeployment() {
     echo "📦 Creating deployment package..."
 
-    // Find the solution (.sln) file in the workspace
+    // Use the environment variable
     if (!env.NUNIT_PROJECTS) {
         error "❌ Main solution path not set. Cannot run linter."
     }
@@ -561,8 +561,8 @@ def packageForDeployment() {
     // Publish the final, runnable artifacts to the 'publish' directory
     sh "dotnet publish '${projectPath}' --configuration Release --output ./publish"
 
-    // Zip the contents of the 'publish' directory into app.zip
-    sh "cd publish && zip -r ../app.zip . && cd .."
+    // Use the built-in Jenkins zip step
+    zip(zipFile: 'app.zip', dir: 'publish')
 
     echo "✅ Created deployment package: app.zip"
 }
