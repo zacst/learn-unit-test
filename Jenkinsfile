@@ -4,7 +4,7 @@
  * This pipeline automates the build, test, analysis, and deployment of a .NET application.
  * It includes stages for:
  * - Compiling the code
- * - Running NUnit tests and generating coverage reports
+ * - Running NUnit tests and generating coverage reports (conditionally)
  * - Performing Static Application Security Testing (SAST) with SonarQube and Semgrep
  * - Linting and secrets detection
  * - Publishing artifacts to JFrog Artifactory
@@ -32,6 +32,11 @@ pipeline {
         DOTNET_CLI_TELEMETRY_OPTOUT = 'true'
         DOTNET_FORMAT_VERSION = '7.0.400' // Compatible with your SDK
         DOTNET_VERBOSITY = 'n' // Default verbosity (n: normal, q: quiet, m: minimal, d: detailed)
+
+        // --- Project Paths (discovered at runtime) ---
+        SOLUTION_FILE_PATH = ''
+        MAIN_PROJECT_PATH = ''
+        NUNIT_PROJECTS = ''
 
         // --- Reporting Directories ---
         TEST_RESULTS_DIR = 'test-results'
@@ -87,6 +92,7 @@ pipeline {
     // =========================================================================
     parameters {
         // --- Test & Coverage ---
+        booleanParam(name: 'RUN_UNIT_TESTS', defaultValue: true, description: 'Run NUnit tests and generate coverage reports if test projects are found.')
         booleanParam(name: 'GENERATE_COVERAGE', defaultValue: true, description: 'Generate code coverage reports')
         booleanParam(name: 'FAIL_ON_TEST_FAILURE', defaultValue: true, description: 'Fail the build if any tests fail')
         choice(name: 'LOG_LEVEL', choices: ['INFO', 'DEBUG', 'WARN', 'ERROR'], description: 'Set logging level for test execution')
@@ -139,10 +145,10 @@ pipeline {
             }
         }
 
-        stage('Discover NUnit Test Projects') {
+        stage('Discover Projects & Solution') {
             steps {
                 script {
-                    discoverTestProjects()
+                    discoverProjectsAndSolution()
                 }
             }
         }
@@ -305,7 +311,6 @@ def initializeBuild() {
     def verbosityMapping = [INFO: 'n', DEBUG: 'd', WARN: 'm', ERROR: 'q']
     env.DOTNET_VERBOSITY = verbosityMapping.get(params.LOG_LEVEL, 'n')
     echo "🔧 dotnet verbosity set to: ${env.DOTNET_VERBOSITY}"
-    env.NUNIT_PROJECTS = ''
 }
 
 /**
@@ -344,14 +349,8 @@ def setupDotnet() {
  */
 def restoreDependencies() {
     echo "📦 Restoring .NET dependencies..."
-    if (!env.NUNIT_PROJECTS) {
-        echo "⚠️ No NUnit test project found to restore."
-        return
-    }
-    // Use the environment variable directly
-    def projectPath = env.NUNIT_PROJECTS
-    if (projectPath) {
-        sh "dotnet restore '${projectPath}' --verbosity ${env.DOTNET_VERBOSITY}"
+    if (env.SOLUTION_FILE_PATH) {
+        sh "dotnet restore '${env.SOLUTION_FILE_PATH}' --verbosity ${env.DOTNET_VERBOSITY}"
     } else {
         echo "⚠️ No solution file found. Running restore on the current directory."
         sh "dotnet restore --verbosity ${env.DOTNET_VERBOSITY}"
@@ -376,8 +375,16 @@ def runBuildTestAndSast() {
             
             startDotnetSonarScanner()
             buildSolution()
-            runNunitTests()
-            generateCoverageReports()
+
+            // *** Conditionally run tests and coverage ***
+            if (params.RUN_UNIT_TESTS && env.NUNIT_PROJECTS) {
+                runNunitTests()
+                if (params.GENERATE_COVERAGE) {
+                    generateCoverageReports()
+                }
+            } else {
+                echo "ℹ️ Skipping unit tests and coverage generation as per configuration or no test projects found."
+            }
 
         } catch (e) {
             echo "❌ Build, Test, or SonarQube analysis failed: ${e.getMessage()}"
@@ -409,55 +416,44 @@ def installDotnetTool(String toolName, String version = '') {
 /**
  * Starts the SonarQube scanner.
  */
-
-// If sonar-scanner was used
-def startSonarScanner() {
-    echo "🔍 Starting SonarQube analysis..."
-    sh '''
-        sonar-scanner \\
-            -Dsonar.projectKey="$SONAR_PROJECT_KEY" \\
-            -Dsonar.sources=. \\
-            -Dsonar.cs.nunit.reportsPaths="''' + TEST_RESULTS_DIR + '''/*.trx" \\
-            -Dsonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
-            -Dsonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
-            -Dsonar.test.exclusions="**/*.Tests/**" \\
-            -Dsonar.coverage.exclusions="**/*.Tests/**"
-    '''
-}
-
- // If dotnet-sonarscanner was used
 def startDotnetSonarScanner() {
     echo "🔍 Starting SonarQube analysis..."
-    sh """
+    
+    // Base command for SonarQube scanner
+    def sonarBeginCmd = """
         export PATH="\$PATH:\$HOME/.dotnet/tools"
         dotnet sonarscanner begin \\
             /key:"\$SONAR_PROJECT_KEY" \\
             /d:sonar.host.url="\$SONAR_HOST_URL" \\
             /d:sonar.login="\$SONAR_AUTH_TOKEN" \\
-            /d:sonar.cs.nunit.reportsPaths="\$TEST_RESULTS_DIR/*.trx" \\
-            /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml" \\
             /d:sonar.exclusions="**/bin/**,**/obj/**,**/*.Tests/**,**/security-reports/**,**/coverage-reports/**" \\
             /d:sonar.test.exclusions="**/*.Tests/**" \\
             /d:sonar.coverage.exclusions="**/*.Tests/**"
     """
+
+    // Conditionally add test and coverage report paths if tests are enabled
+    if (params.RUN_UNIT_TESTS && env.NUNIT_PROJECTS) {
+        sonarBeginCmd += """ \\
+            /d:sonar.cs.nunit.reportsPaths="\$TEST_RESULTS_DIR/*.trx" \\
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.cobertura.xml"
+        """
+        echo "   -> Including test and coverage reports in SonarQube analysis."
+    }
+
+    sh sonarBeginCmd
 }
+
 
 /**
  * Builds the .NET solution.
  */
 def buildSolution() {
     echo "🔨 Building .NET solution..."
-    if (!env.NUNIT_PROJECTS) {
-        echo "⚠️ No NUnit test project found to restore."
-        return
-    }
-    // Use the environment variable directly
-    def projectPath = env.NUNIT_PROJECTS
-    if (projectPath) {
-        echo "🔨 Building solution: ${projectPath}"
-        sh "dotnet build '${projectPath}' --configuration Release --no-restore --verbosity ${env.DOTNET_VERBOSITY}"
+    if (env.SOLUTION_FILE_PATH) {
+        echo "🔨 Building solution: ${env.SOLUTION_FILE_PATH}"
+        sh "dotnet build '${env.SOLUTION_FILE_PATH}' --configuration Release --no-restore --verbosity ${env.DOTNET_VERBOSITY}"
     } else {
-        echo "🔨 No solution files found, building all projects..."
+        echo "🔨 No solution file found, building all projects in the repository..."
         sh "dotnet build --configuration Release --no-restore --verbosity ${env.DOTNET_VERBOSITY}"
     }
 }
@@ -466,6 +462,7 @@ def buildSolution() {
  * Runs NUnit tests for the discovered projects.
  */
 def runNunitTests() {
+    // This check is now inside runBuildTestAndSast, but kept here for safety.
     if (!env.NUNIT_PROJECTS) {
         echo "⚠️ No NUnit test projects found to run."
         return
@@ -495,8 +492,6 @@ def runNunitTests() {
  * Generates HTML coverage reports from Cobertura XML files.
  */
 def generateCoverageReports() {
-    if (!params.GENERATE_COVERAGE) return
-
     echo "📊 Generating coverage reports..."
     def coverageFiles = findFiles(glob: '**/coverage.cobertura.xml')
     if (coverageFiles) {
@@ -510,28 +505,13 @@ def generateCoverageReports() {
                 -verbosity:${params.LOG_LEVEL}
         """
     } else {
-        echo "⚠️ No coverage files found."
+        echo "⚠️ No coverage files found to generate reports from."
     }
 }
 
 /**
  * Ends the SonarQube scanner analysis.
  */
-
- // If sonar scanner was used
-def endSonarScanner() {
-    try {
-        echo "🔍 Completing SonarQube analysis..."
-        sh '''
-            export PATH="$PATH:$HOME/.dotnet/tools"
-            dotnet sonarscanner end
-        '''
-    } catch (Exception e) {
-        echo "⚠️ Could not end SonarQube analysis gracefully: ${e.getMessage()}"
-    }
-}
-
-// If dotnet-sonarscanner was used
 def endDotnetSonarScanner() {
     try {
         echo "🔍 Completing SonarQube analysis..."
@@ -550,13 +530,12 @@ def endDotnetSonarScanner() {
 def packageForDeployment() {
     echo "📦 Creating deployment package..."
 
-    // Use the environment variable
-    if (!env.NUNIT_PROJECTS) {
-        error "❌ Main solution path not set. Cannot run linter."
+    if (!env.MAIN_PROJECT_PATH) {
+        error "❌ Main application project path not found. Cannot create deployment package."
     }
 
-    def projectPath = env.NUNIT_PROJECTS
-    echo "🎯 Found solution file to publish: ${projectPath}"
+    def projectPath = env.MAIN_PROJECT_PATH
+    echo "🎯 Publishing project for deployment: ${projectPath}"
 
     // Publish the final, runnable artifacts to the 'publish' directory
     sh "dotnet publish '${projectPath}' --configuration Release --output ./publish"
@@ -685,13 +664,14 @@ def runLinting() {
     def lintingStatus = 'SUCCESS'
     try {
         sh "mkdir -p ${LINTER_REPORTS_DIR}"
-        if (!env.NUNIT_PROJECTS) {
-            error "❌ Main solution path not set. Cannot run linter."
+        if (!env.SOLUTION_FILE_PATH) {
+            echo "⚠️ Solution file not found. Skipping linter."
+            return
         }
 
         installDotnetTool('dotnet-format', env.DOTNET_FORMAT_VERSION)
 
-        def projectPath = env.NUNIT_PROJECTS
+        def projectPath = env.SOLUTION_FILE_PATH
         def formatResult = sh(
             script: """
                 export PATH="\$PATH:\$HOME/.dotnet/tools"
@@ -752,9 +732,6 @@ def publishLintResults() {
 
 /**
  * Converts the JSON output from `dotnet-format` to the standard SARIF format.
- * This version correctly handles the actual report structure.
- * @param jsonReport The parsed JSON object from the dotnet-format report (which is a List).
- * @return A Map representing the SARIF report.
  */
 def convertDotnetFormatToSarif(List jsonReport) {
     def results = []
@@ -797,40 +774,83 @@ def convertDotnetFormatToSarif(List jsonReport) {
 }
 
 //---------------------------------
-// Test Project Discovery Helpers
+// Project Discovery Helpers
 //---------------------------------
+
+/**
+ * Main discovery function to find solution, main project, and test projects.
+ */
+def discoverProjectsAndSolution() {
+    discoverSolutionFile()
+    discoverMainProject()
+    discoverTestProjects()
+}
+
+/**
+ * Discovers the main .sln file in the workspace.
+ */
+def discoverSolutionFile() {
+    echo "🔍 Discovering .NET solution file (.sln)..."
+    def solutionFiles = findFiles(glob: '**/*.sln')
+    echo "[DEBUG] Found ${solutionFiles.length} solution file(s). Paths: ${solutionFiles.collect { it.path }}"
+    if (solutionFiles.length > 0) {
+        if (solutionFiles.length > 1) {
+            echo "⚠️ Multiple solution files found. Using the first one: ${solutionFiles[0].path}"
+        }
+        env.SOLUTION_FILE_PATH = solutionFiles[0].path
+        echo "🎯 Solution file set to: ${env.SOLUTION_FILE_PATH}"
+    } else {
+        echo "⚠️ No .sln file found. Build steps will run on the repository root."
+        env.SOLUTION_FILE_PATH = ''
+    }
+}
+
+/**
+ * Discovers the main, publishable application project.
+ */
+def discoverMainProject() {
+    echo "🔍 Discovering main application project for packaging..."
+    def allProjects = findFiles(glob: '**/*.csproj')
+    def testProjects = findFiles(glob: '**/*Tests/*.csproj') + findFiles(glob: '**/*.Test.csproj')
+    def testProjectPaths = testProjects.collect { it.path }
+
+    echo "[DEBUG] Found ${allProjects.size()} total .csproj files."
+    echo "[DEBUG] Found ${testProjects.size()} test projects matching patterns."
+    
+    // Filter out test projects
+    def mainProjects = allProjects.findAll { proj -> !testProjectPaths.contains(proj.path) }
+
+    echo "[DEBUG] After filtering, found ${mainProjects.size()} main projects."
+
+    if (!mainProjects.isEmpty()) {
+        // Heuristic: Prefer projects that look like executables or web apps
+        def publishableProject = mainProjects.find { p ->
+            def content = readFile(p.path)
+            // Check for OutputType Exe or presence of web-related SDKs
+            return content.contains('<OutputType>Exe</OutputType>') || content.contains('Microsoft.NET.Sdk.Web')
+        } ?: mainProjects[0] // Fallback to the first non-test project
+
+        env.MAIN_PROJECT_PATH = publishableProject.path
+        echo "🎯 Main project for packaging set to: ${env.MAIN_PROJECT_PATH}"
+    } else {
+        echo "⚠️ No main application project found. The 'Package for Deployment' stage may fail."
+        env.MAIN_PROJECT_PATH = ''
+    }
+}
 
 /**
  * Discovers a single NUnit test project and sets its path as an environment variable.
  */
 def discoverTestProjects() {
-    echo "🔍 Discovering single NUnit test project..."
-    
-    // findNunitProjects() returns a list with either zero or one project path.
+    echo "🔍 Discovering NUnit test projects..."
     def nunitProjectsList = findNunitProjects()
-    def finalProjectPath = ''
 
     if (!nunitProjectsList.isEmpty()) {
-        // A project was found automatically.
-        finalProjectPath = nunitProjectsList[0]
+        env.NUNIT_PROJECTS = nunitProjectsList[0] // Using the first one found
+        echo "🎯 NUnit project for testing set to: ${env.NUNIT_PROJECTS}"
     } else {
-        // If no project was found, check the fallback environment variable.
-        echo "⚠️ No NUnit project discovered automatically. Using fallback."
-        def fallbackProject = env.FALLBACK_NUNIT_PROJECTS ?: ''
-        
-        if (fallbackProject && fileExists(fallbackProject.trim())) {
-            finalProjectPath = fallbackProject.trim()
-        } else if (fallbackProject) {
-            echo "❌ Fallback project not found: ${fallbackProject}"
-        }
-    }
-
-    // Final check: if a project was found (either automatically or via fallback), set it.
-    if (finalProjectPath) {
-        env.NUNIT_PROJECTS = finalProjectPath
-        echo "🎯 NUnit project set to: ${env.NUNIT_PROJECTS}"
-    } else {
-        error("❌ No valid NUnit test project found, and no valid fallback project available.")
+        echo "ℹ️ No NUnit test projects found. Unit testing and coverage will be skipped."
+        env.NUNIT_PROJECTS = ''
     }
 }
 
@@ -840,19 +860,15 @@ def discoverTestProjects() {
 def findNunitProjects() {
     def csprojFiles = findFiles(glob: '**/*Tests/*.csproj') + findFiles(glob: '**/*.Test.csproj')
 
-    // Find the first project file that contains the required NUnit package references
-    def firstNunitProject = csprojFiles.find { projectFile ->
+    def nunitProjects = csprojFiles.findAll { projectFile ->
         def projectContent = readFile(projectFile.path)
-        // Return true for the first item that satisfies the condition
         return projectContent.contains('NUnit') && projectContent.contains('Microsoft.NET.Test.Sdk')
     }
 
-    if (firstNunitProject) {
-        echo "✅ First NUnit project detected and selected: ${firstNunitProject.path}"
-        // Return a list containing only the path of the first matching project
-        return [firstNunitProject.path]
+    if (!nunitProjects.isEmpty()) {
+        echo "✅ Found ${nunitProjects.size()} NUnit project(s)."
+        return nunitProjects.collect { it.path }
     } else {
-        // Return an empty list if no NUnit projects were found
         return []
     }
 }
@@ -866,6 +882,9 @@ def findNunitProjects() {
  * Archives and publishes test results.
  */
 def archiveAndPublishTestResults() {
+    // Only run if tests were supposed to run
+    if (!params.RUN_UNIT_TESTS) return
+
     echo "📊 Archiving and publishing test results..."
 
     // Archive raw TRX files
@@ -934,7 +953,6 @@ def publishSecurityResults() {
 
 /**
  * The main controller function for uploads with enhanced error handling and configuration.
- * It gathers all artifact rules, builds a single File Spec, and runs one upload command.
  */
 def uploadArtifacts() {
     echo "📦 Preparing to upload artifacts using comprehensive best practices..."
@@ -972,11 +990,11 @@ def uploadArtifacts() {
             }
 
             def uploadCmd = "rt u --spec=upload-spec.json " +
-                          "--build-name=${JFROG_CLI_BUILD_NAME} " +
-                          "--build-number=${JFROG_CLI_BUILD_NUMBER} " +
-                          "--detailed-summary " +
-                          "--fail-no-op " +
-                          "--threads=3"
+                            "--build-name=${JFROG_CLI_BUILD_NAME} " +
+                            "--build-number=${JFROG_CLI_BUILD_NUMBER} " +
+                            "--detailed-summary " +
+                            "--fail-no-op " +
+                            "--threads=3"
             
             jf uploadCmd
             addBuildProperties()
@@ -1082,11 +1100,11 @@ def List getBinarySpecEntries() {
     binaryPatterns.each { pattern ->
         def binaryFiles = findFiles(glob: pattern)
         if (binaryFiles.size() > 0) {
-            echo "  - Found ${binaryFiles.size()} binaries matching: ${pattern}"
+            echo "   - Found ${binaryFiles.size()} binaries matching: ${pattern}"
             
             def config = pattern.contains('Release') ? 'release' : 
-                        pattern.contains('Debug') ? 'debug' : 
-                        pattern.contains('publish') ? 'published' : 'other'
+                         pattern.contains('Debug') ? 'debug' : 
+                         pattern.contains('publish') ? 'published' : 'other'
             
             entries.add([
                 "pattern": pattern,
@@ -1110,8 +1128,7 @@ def List getNugetSpecEntries() {
     // Regular NuGet packages
     def nugetFiles = findFiles(glob: '**/bin/**/*.nupkg')
     if (nugetFiles.size() > 0) {
-        echo "  - Found ${nugetFiles.size()} NuGet packages to upload."
-        validateNugetPackages(nugetFiles)
+        echo "   - Found ${nugetFiles.size()} NuGet packages to upload."
         
         entries.add([
             "pattern": "**/bin/**/*.nupkg",
@@ -1124,7 +1141,7 @@ def List getNugetSpecEntries() {
     // Symbol packages (.symbols.nupkg)
     def symbolFiles = findFiles(glob: '**/bin/**/*.symbols.nupkg')
     if (symbolFiles.size() > 0) {
-        echo "  - Found ${symbolFiles.size()} symbol packages to upload."
+        echo "   - Found ${symbolFiles.size()} symbol packages to upload."
         entries.add([
             "pattern": "**/bin/**/*.symbols.nupkg",
             "target": "${ARTIFACTORY_REPO_NUGET}/symbols/",
@@ -1135,7 +1152,7 @@ def List getNugetSpecEntries() {
     // Portable symbol packages (.snupkg)
     def portableSymbolFiles = findFiles(glob: '**/bin/**/*.snupkg')
     if (portableSymbolFiles.size() > 0) {
-        echo "  - Found ${portableSymbolFiles.size()} portable symbol packages to upload."
+        echo "   - Found ${portableSymbolFiles.size()} portable symbol packages to upload."
         entries.add([
             "pattern": "**/bin/**/*.snupkg",
             "target": "${ARTIFACTORY_REPO_NUGET}/portable-symbols/",
@@ -1156,7 +1173,7 @@ def getReportSpecEntries() {
     // Test results
     def testResultsDir = env.getProperty('TEST_RESULTS_DIR')
     if (testResultsDir && fileExists(testResultsDir)) {
-        echo "  - Found test results to upload."
+        echo "   - Found test results to upload."
         entries.add([
             "pattern": "${testResultsDir}/**/*.{trx,xml,json,html}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/test-results/${BUILD_NUMBER}_${timestamp}/",
@@ -1168,7 +1185,7 @@ def getReportSpecEntries() {
     // Coverage reports
     def coverageReportsDir = env.getProperty('COVERAGE_REPORTS_DIR')
     if (coverageReportsDir && fileExists(coverageReportsDir)) {
-        echo "  - Found coverage reports to upload."
+        echo "   - Found coverage reports to upload."
         entries.add([
             "pattern": "${coverageReportsDir}/**/*",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/coverage/${BUILD_NUMBER}_${timestamp}/",
@@ -1181,7 +1198,7 @@ def getReportSpecEntries() {
     // Linting reports
     def linterReportsDir = env.getProperty('LINTER_REPORTS_DIR')
     if (linterReportsDir && fileExists(linterReportsDir)) {
-        echo "  - Found linting reports to upload."
+        echo "   - Found linting reports to upload."
         entries.add([
             "pattern": "${linterReportsDir}/**/*.{json,xml,sarif}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/linting/${BUILD_NUMBER}_${timestamp}/",
@@ -1193,7 +1210,7 @@ def getReportSpecEntries() {
     // SonarQube reports (if available)
     def sonarReports = findFiles(glob: '.sonar/**/*')
     if (sonarReports.size() > 0) {
-        echo "  - Found SonarQube analysis files to upload."
+        echo "   - Found SonarQube analysis files to upload."
         entries.add([
             "pattern": ".sonar/**/*",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/sonar/${BUILD_NUMBER}_${timestamp}/",
@@ -1215,7 +1232,7 @@ def List getDocumentationSpecEntries() {
     // API documentation
     def docsDir = 'docs/api'
     if (fileExists(docsDir)) {
-        echo "  - Found API documentation to upload."
+        echo "   - Found API documentation to upload."
         entries.add([
             "pattern": "${docsDir}/**/*",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/documentation/${BUILD_NUMBER}/api/",
@@ -1226,7 +1243,7 @@ def List getDocumentationSpecEntries() {
     // README and changelog
     def readmeFiles = findFiles(glob: '{README,CHANGELOG,RELEASE_NOTES}.{md,txt}')
     if (readmeFiles.size() > 0) {
-        echo "  - Found ${readmeFiles.size()} documentation files to upload."
+        echo "   - Found ${readmeFiles.size()} documentation files to upload."
         entries.add([
             "pattern": "{README,CHANGELOG,RELEASE_NOTES}.{md,txt}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/documentation/${BUILD_NUMBER}/",
@@ -1246,7 +1263,7 @@ def List getSecurityReportSpecEntries() {
     
     def securityReportsDir = env.getProperty('SECURITY_REPORTS_DIR')
     if (securityReportsDir && fileExists(securityReportsDir)) {
-        echo "  - Found security reports to upload."
+        echo "   - Found security reports to upload."
         entries.add([
             "pattern": "${securityReportsDir}/**/*.{sarif,json,xml,html,txt}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/security/${BUILD_NUMBER}_${timestamp}/",
@@ -1266,7 +1283,7 @@ def List getSourceCodeSpecEntries() {
     
     // Only upload source if specifically requested
     if (params.UPLOAD_SOURCE_CODE == true) {
-        echo "  - Preparing source code for upload."
+        echo "   - Preparing source code for upload."
         entries.add([
             "pattern": "**/*.{cs,csproj,sln,config,json,xml}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/source/${BUILD_NUMBER}/",
@@ -1299,7 +1316,7 @@ def List getConfigurationSpecEntries() {
     }
     
     if (deploymentConfigs.size() > 0) {
-        echo "  - Found ${deploymentConfigs.size()} configuration files to upload."
+        echo "   - Found ${deploymentConfigs.size()} configuration files to upload."
         entries.add([
             "pattern": "**/{appsettings,web,app}.{config,json,xml}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/configs/${BUILD_NUMBER}/",
@@ -1312,7 +1329,7 @@ def List getConfigurationSpecEntries() {
     // Deployment scripts
     def scriptFiles = findFiles(glob: '**/*.{ps1,sh,bat,cmd}')
     if (scriptFiles.size() > 0) {
-        echo "  - Found ${scriptFiles.size()} script files to upload."
+        echo "   - Found ${scriptFiles.size()} script files to upload."
         entries.add([
             "pattern": "**/*.{ps1,sh,bat,cmd}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/scripts/${BUILD_NUMBER}/",
@@ -1343,7 +1360,7 @@ def List getBuildArtifactSpecEntries() {
     // MSBuild logs
     def msbuildLogs = findFiles(glob: '**/msbuild*.log')
     if (msbuildLogs.size() > 0) {
-        echo "  - Found ${msbuildLogs.size()} MSBuild log files to upload."
+        echo "   - Found ${msbuildLogs.size()} MSBuild log files to upload."
         entries.add([
             "pattern": "**/msbuild*.log",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/msbuild-logs/${BUILD_NUMBER}/",
@@ -1354,10 +1371,10 @@ def List getBuildArtifactSpecEntries() {
     
     // Dependency lock files
     def lockFiles = findFiles(glob: '**/packages.lock.json') + 
-                   findFiles(glob: '**/project.lock.json') +
-                   findFiles(glob: '**/project.assets.json')
+                    findFiles(glob: '**/project.lock.json') +
+                    findFiles(glob: '**/project.assets.json')
     if (lockFiles.size() > 0) {
-        echo "  - Found ${lockFiles.size()} dependency lock files to upload."
+        echo "   - Found ${lockFiles.size()} dependency lock files to upload."
         entries.add([
             "pattern": "**/{packages.lock.json,project.lock.json,project.assets.json}",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/dependencies/${BUILD_NUMBER}/",
@@ -1377,10 +1394,10 @@ def List getContainerImageSpecEntries() {
     
     // Dockerfile and related files
     def dockerFiles = findFiles(glob: '**/Dockerfile*') + 
-                     findFiles(glob: '**/.dockerignore') +
-                     findFiles(glob: '**/docker-compose*.{yml,yaml}')
+                      findFiles(glob: '**/.dockerignore') +
+                      findFiles(glob: '**/docker-compose*.{yml,yaml}')
     if (dockerFiles.size() > 0) {
-        echo "  - Found ${dockerFiles.size()} Docker-related files to upload."
+        echo "   - Found ${dockerFiles.size()} Docker-related files to upload."
         entries.add([
             "pattern": "**/Dockerfile*",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/docker/${BUILD_NUMBER}/",
@@ -1413,7 +1430,7 @@ def List getDependencySpecEntries() {
     // NuGet packages.config files
     def packagesConfigs = findFiles(glob: '**/packages.config')
     if (packagesConfigs.size() > 0) {
-        echo "  - Found ${packagesConfigs.size()} packages.config files to upload."
+        echo "   - Found ${packagesConfigs.size()} packages.config files to upload."
         entries.add([
             "pattern": "**/packages.config",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/package-configs/${BUILD_NUMBER}/",
@@ -1424,10 +1441,10 @@ def List getDependencySpecEntries() {
     
     // License files
     def licenseFiles = findFiles(glob: '**/LICENSE*') + 
-                      findFiles(glob: '**/NOTICE*') +
-                      findFiles(glob: '**/THIRD-PARTY*')
+                       findFiles(glob: '**/NOTICE*') +
+                       findFiles(glob: '**/THIRD-PARTY*')
     if (licenseFiles.size() > 0) {
-        echo "  - Found ${licenseFiles.size()} license files to upload."
+        echo "   - Found ${licenseFiles.size()} license files to upload."
         entries.add([
             "pattern": "**/{LICENSE,NOTICE,THIRD-PARTY}*",
             "target": "${ARTIFACTORY_REPO_REPORTS}/${JOB_NAME}/licenses/${BUILD_NUMBER}/",
@@ -1446,7 +1463,7 @@ def List getDeploymentPackageSpecEntries() {
     def entries = []
 
     if (fileExists('app.zip')) {
-        echo "  - Found deployment package 'app.zip' to upload."
+        echo "   - Found deployment package 'app.zip' to upload."
         entries.add([
             "pattern": "app.zip",
             "target": "${ARTIFACTORY_REPO_BINARIES}/${JOB_NAME}/${BUILD_NUMBER}/app.zip",
@@ -1487,7 +1504,6 @@ def evaluateQualityGate() {
  */
 def generateSecuritySummary() {
     echo "📊 Generating security summary..."
-    // This function can be expanded to parse report files for a more detailed summary.
     def summary = """
     🔒 Security Scan Summary
     ========================
@@ -1506,10 +1522,7 @@ def evaluateSecurityGates() {
     if (!params.FAIL_ON_SECURITY_ISSUES) return
 
     echo "🚧 Evaluating security gates..."
-    // This logic can be enhanced by parsing SARIF files for exact critical issue counts.
-    // For now, it relies on the status set by other stages.
     if (currentBuild.currentResult == 'UNSTABLE') {
-        // You could add more specific checks here
         echo "⚠️ Build is unstable due to security issues."
     }
 }
