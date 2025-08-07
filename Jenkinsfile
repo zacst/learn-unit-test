@@ -378,7 +378,7 @@ def runBuildTestAndSast() {
 
             // *** Conditionally run tests and coverage ***
             if (params.RUN_UNIT_TESTS && env.NUNIT_PROJECTS) {
-                runNunitTests()
+                runUnitTests()
                 if (params.GENERATE_COVERAGE) {
                     generateCoverageReports()
                 }
@@ -459,32 +459,36 @@ def buildSolution() {
 }
 
 /**
- * Runs NUnit tests for the discovered projects.
+ * Executes 'dotnet test' on all discovered unit test projects.
  */
-def runNunitTests() {
-    // This check is now inside runBuildTestAndSast, but kept here for safety.
-    if (!env.NUNIT_PROJECTS) {
-        echo "⚠️ No NUnit test projects found to run."
-        return
-    }
+def runUnitTests() {
+    echo "🧪 Running unit tests..."
+    // Ensure the tools for coverage are installed
+    installDotnetTool('coverlet.console')
 
-    echo "🧪 Running NUnit tests..."
-    def projectPath = env.NUNIT_PROJECTS
-    def coverageArg = params.GENERATE_COVERAGE ? '--collect:"XPlat Code Coverage"' : ''
-
-    if (projectPath) {
-        echo "🧪 Running tests in: ${projectPath}"
-        def projectName = projectPath.split('/')[-1].replace('.csproj', '')
-        sh """
-            dotnet test '${projectPath}' \\
-                --configuration Release \\
-                --no-build \\
-                --logger "trx;LogFileName=nunit-results-${projectName}.trx" \\
-                --results-directory ${TEST_RESULTS_DIR} \\
-                ${coverageArg} \\
-                -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura \\
-                --verbosity ${env.DOTNET_VERBOSITY}
-        """
+    unitProjectPaths.each { projectPath ->
+        try {
+            echo "   -> Testing project: ${projectPath}"
+            // Sanitize project name to use in file paths
+            def projectName = projectPath.split('/')[-1].replace('.csproj', '')
+            
+            def testCommand = """
+                dotnet test '${projectPath}' \\
+                    --configuration Release \\
+                    --no-build \\
+                    --logger "trx;LogFileName=${TEST_RESULTS_DIR}/${projectName}-test-results.trx" \\
+                    /p:CollectCoverage=true \\
+                    /p:CoverletOutputFormat=cobertura \\
+                    /p:CoverletOutput='${TEST_RESULTS_DIR}/${projectName}.coverage.cobertura.xml'
+            """
+            sh testCommand
+        } catch (e) {
+            echo "❌ Test execution failed for project: ${projectPath}"
+            // Depending on params, either fail fast or continue
+            if (params.FAIL_ON_TEST_FAILURE) {
+                throw e
+            }
+        }
     }
 }
 
