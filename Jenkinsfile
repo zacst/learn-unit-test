@@ -128,38 +128,54 @@ pipeline {
         stage('Prepare Version') {
             steps {
                 script {
-                def major = params.MAJOR_VERSION
-                def minor = params.MINOR_VERSION
-                def patch = 0
+                    def major = params.MAJOR_VERSION
+                    def minor = params.MINOR_VERSION
+                    def repository = "your-dockerhub-username/your-image-name" // IMPORTANT: Change this
 
-                if (params.PATCH?.trim()) {
-                    // Use manual input
-                    patch = params.PATCH.toInteger()
-                    echo "Using manually provided patch version: ${patch}"
-                } else {
-                    // Auto-increment based on previous build's display name (e.g., "1.2.3")
-                    def lastBuild = currentBuild.rawBuild.getPreviousBuild()
-                    if (lastBuild != null) {
-                    def lastName = lastBuild.getDisplayName()
-                    def matcher = lastName =~ /^(\d+)\.(\d+)\.(\d+)$/
-                    if (matcher.matches()) {
-                        patch = matcher[0][3].toInteger() + 1
-                        echo "Auto-incremented patch from last build: ${patch}"
-                    } else {
-                        patch = 1
-                        echo "Previous build name didn't match version pattern, starting from patch: ${patch}"
-                    }
-                    } else {
-                    patch = 1
-                    echo "No previous build found, starting from patch: ${patch}"
-                    }
-                }
+                    echo "Searching Docker Hub for latest patch of ${repository}:${major}.${minor}.x"
 
-                env.PATCH = patch.toString()
-                env.FULL_VERSION = "${major}.${minor}.${patch}"
-                env.IMAGE_TAG = "${env.FULL_VERSION}"
-                echo "Resolved version: ${env.FULL_VERSION}"
-                currentBuild.displayName = "${env.FULL_VERSION}"
+                    def highestPatch = sh(
+                        script: """
+                            #!/bin/bash
+                            set -e
+                            
+                            # Fetch all tags for the repository from the Docker Hub API
+                            TAGS=\$(curl -s "https://hub.docker.com/v2/repositories/${repository}/tags/?page_size=250" | jq -r '.results[].name')
+                            
+                            HIGHEST=-1
+                            # Loop through all found tags to find the highest patch for the current series
+                            for T in \$TAGS; do
+                                # Check if a tag matches the "major.minor.patch" pattern we want
+                                if [[ \$T =~ ^${major}\\.${minor}\\.([0-9]+)\$ ]]; then
+                                    PATCH=\${BASH_REMATCH[1]}
+                                    if (( PATCH > HIGHEST )); then
+                                        HIGHEST=\$PATCH
+                                    fi
+                                fi
+                            done
+                            
+                            # Return the highest patch number found (-1 if none were found)
+                            echo \$HIGHEST
+                        """,
+                        returnStdout: true
+                    ).trim().toInteger()
+
+                    // This single line implements the SemVer reset logic.
+                    // If a patch was found (highestPatch >= 0), we increment it.
+                    // If no patch was found for a new MAJOR/MINOR series, we start at 0.
+                    def patch = (highestPatch >= 0) ? highestPatch + 1 : 0
+                    
+                    if (highestPatch >= 0) {
+                        echo "Found highest existing patch: ${highestPatch}. New patch will be: ${patch}"
+                    } else {
+                        echo "No existing tags found for ${major}.${minor}.*. Starting new series with patch: 0"
+                    }
+
+                    env.FULL_VERSION = "${major}.${minor}.${patch}"
+                    env.IMAGE_TAG = env.FULL_VERSION
+                    currentBuild.displayName = env.FULL_VERSION
+                    
+                    echo "Version set to: ${env.FULL_VERSION}"
                 }
             }
         }
