@@ -459,6 +459,27 @@ def buildSolution() {
 }
 
 /**
+ * Finds all files that are C# test projects.
+ */
+def findUnitProjects() {
+    // A more reliable pattern to find all test projects
+    def csprojFiles = findFiles(glob: '**/*.csproj')
+
+    def testProjects = csprojFiles.findAll { projectFile ->
+        def projectContent = readFile(projectFile.path)
+        // The presence of 'Microsoft.NET.Test.Sdk' is the correct way to identify a test project.
+        return projectContent.contains('Microsoft.NET.Test.Sdk')
+    }
+
+    if (!testProjects.isEmpty()) {
+        echo "✅ Found ${testProjects.size()} test project(s)."
+        return testProjects.collect { it.path }
+    } else {
+        return []
+    }
+}
+
+/**
  * Executes 'dotnet test' on all discovered unit test projects.
  */
 def runUnitTests() {
