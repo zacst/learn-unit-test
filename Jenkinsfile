@@ -134,35 +134,37 @@ pipeline {
 
                     echo "Searching Docker Hub for latest patch of ${repository}:${major}.${minor}.x"
 
-                    def highestPatch = sh(
-                        script: """
-                            #!/bin/bash
-                            set -e
-                            
-                            # Fetch all tags for the repository from the Docker Hub API
-                            TAGS=\$(curl -s "https://hub.docker.com/v2/repositories/${repository}/tags/?page_size=250" | jq -r '.results[].name')
-                            
-                            HIGHEST=-1
-                            # Loop through all found tags to find the highest patch for the current series
-                            for T in \$TAGS; do
-                                # Check if a tag matches the "major.minor.patch" pattern we want
-                                if [[ \$T =~ ^${major}\\.${minor}\\.([0-9]+)\$ ]]; then
-                                    PATCH=\${BASH_REMATCH[1]}
-                                    if (( PATCH > HIGHEST )); then
-                                        HIGHEST=\$PATCH
-                                    fi
-                                fi
-                            done
-                            
-                            # Return the highest patch number found (-1 if none were found)
-                            echo \$HIGHEST
-                        """,
+                    // 1. Use curl to get the raw JSON text. No parsing is done in the shell.
+                    def responseText = sh(
+                        script: "curl -s 'https://hub.docker.com/v2/repositories/${repository}/tags/?page_size=250'",
                         returnStdout: true
-                    ).trim().toInteger()
+                    ).trim()
 
-                    // This single line implements the SemVer reset logic.
-                    // If a patch was found (highestPatch >= 0), we increment it.
-                    // If no patch was found for a new MAJOR/MINOR series, we start at 0.
+                    // 2. Use Jenkins' built-in readJSON to parse the text into a Groovy object
+                    def responseData = readJSON(text: responseText)
+                    
+                    int highestPatch = -1
+                    def pattern = ~/(\d+)\.(\d+)\.(\d+)/
+
+                    // 3. Loop through the results in Groovy - much cleaner than a bash loop
+                    responseData.results.each { tag ->
+                        def tagName = tag.name
+                        def matcher = (tagName =~ pattern)
+                        
+                        if (matcher.matches()) {
+                            def tagMajor = matcher[0][1]
+                            def tagMinor = matcher[0][2]
+                            def tagPatch = matcher[0][3].toInteger()
+
+                            if (tagMajor == major && tagMinor == minor) {
+                                if (tagPatch > highestPatch) {
+                                    highestPatch = tagPatch
+                                }
+                            }
+                        }
+                    }
+
+                    // The rest of the logic is the same
                     def patch = (highestPatch >= 0) ? highestPatch + 1 : 0
                     
                     if (highestPatch >= 0) {
@@ -170,7 +172,7 @@ pipeline {
                     } else {
                         echo "No existing tags found for ${major}.${minor}.*. Starting new series with patch: 0"
                     }
-
+                    
                     env.FULL_VERSION = "${major}.${minor}.${patch}"
                     env.IMAGE_TAG = env.FULL_VERSION
                     currentBuild.displayName = env.FULL_VERSION
