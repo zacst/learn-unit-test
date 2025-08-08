@@ -91,6 +91,10 @@ pipeline {
     // Build Parameters
     // =========================================================================
     parameters {
+        // -- Build Number ---
+        string(name: 'MAJOR_VERSION', defaultValue: '1', description: 'Major version')
+        string(name: 'MINOR_VERSION', defaultValue: '1', description: 'Minor version')
+
         // --- Test & Coverage ---
         booleanParam(name: 'RUN_UNIT_TESTS', defaultValue: true, description: 'Run NUnit tests and generate coverage reports if test projects are found.')
         booleanParam(name: 'GENERATE_COVERAGE', defaultValue: true, description: 'Generate code coverage reports')
@@ -121,6 +125,45 @@ pipeline {
     // Pipeline Stages
     // =========================================================================
     stages {
+        stage('Prepare Version') {
+            steps {
+                script {
+                def major = params.MAJOR_VERSION
+                def minor = params.MINOR_VERSION
+                def patch = 0
+
+                if (params.PATCH?.trim()) {
+                    // Use manual input
+                    patch = params.PATCH.toInteger()
+                    echo "Using manually provided patch version: ${patch}"
+                } else {
+                    // Auto-increment based on previous build's display name (e.g., "1.2.3")
+                    def lastBuild = currentBuild.rawBuild.getPreviousBuild()
+                    if (lastBuild != null) {
+                    def lastName = lastBuild.getDisplayName()
+                    def matcher = lastName =~ /^(\d+)\.(\d+)\.(\d+)$/
+                    if (matcher.matches()) {
+                        patch = matcher[0][3].toInteger() + 1
+                        echo "Auto-incremented patch from last build: ${patch}"
+                    } else {
+                        patch = 1
+                        echo "Previous build name didn't match version pattern, starting from patch: ${patch}"
+                    }
+                    } else {
+                    patch = 1
+                    echo "No previous build found, starting from patch: ${patch}"
+                    }
+                }
+
+                env.PATCH = patch.toString()
+                env.FULL_VERSION = "${major}.${minor}.${patch}"
+                env.IMAGE_TAG = "${env.FULL_VERSION}"
+                echo "Resolved version: ${env.FULL_VERSION}"
+                currentBuild.displayName = "${env.FULL_VERSION}"
+                }
+            }
+        }
+
         stage('Initialize') {
             steps {
                 script {
