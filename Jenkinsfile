@@ -130,7 +130,7 @@ pipeline {
                 script {
                     def major = params.MAJOR_VERSION
                     def minor = params.MINOR_VERSION
-                    def repository = "your-dockerhub-username/your-image-name" // IMPORTANT: Change this
+                    def repository = "zacst/pipeline" // IMPORTANT: Change this
 
                     echo "Searching Docker Hub for latest patch of ${repository}:${major}.${minor}.x"
 
