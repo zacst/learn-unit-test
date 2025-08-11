@@ -128,56 +128,7 @@ pipeline {
         stage('Prepare Version') {
             steps {
                 script {
-                    def major = params.MAJOR_VERSION
-                    def minor = params.MINOR_VERSION
-                    def repository = "zacst/pipeline" // IMPORTANT: Change this
-
-                    echo "Searching Docker Hub for latest patch of ${repository}:${major}.${minor}.x"
-
-                    // 1. Use curl to get the raw JSON text. No parsing is done in the shell.
-                    def responseText = sh(
-                        script: "curl -s 'https://hub.docker.com/v2/repositories/${repository}/tags/?page_size=250'",
-                        returnStdout: true
-                    ).trim()
-
-                    // 2. Use Jenkins' built-in readJSON to parse the text into a Groovy object
-                    def responseData = readJSON(text: responseText)
-                    
-                    int highestPatch = -1
-                    def pattern = ~/(\d+)\.(\d+)\.(\d+)/
-
-                    // 3. Loop through the results in Groovy - much cleaner than a bash loop
-                    responseData.results.each { tag ->
-                        def tagName = tag.name
-                        def matcher = (tagName =~ pattern)
-                        
-                        if (matcher.matches()) {
-                            def tagMajor = matcher[0][1]
-                            def tagMinor = matcher[0][2]
-                            def tagPatch = matcher[0][3].toInteger()
-
-                            if (tagMajor == major && tagMinor == minor) {
-                                if (tagPatch > highestPatch) {
-                                    highestPatch = tagPatch
-                                }
-                            }
-                        }
-                    }
-
-                    // The rest of the logic is the same
-                    def patch = (highestPatch >= 0) ? highestPatch + 1 : 0
-                    
-                    if (highestPatch >= 0) {
-                        echo "Found highest existing patch: ${highestPatch}. New patch will be: ${patch}"
-                    } else {
-                        echo "No existing tags found for ${major}.${minor}.*. Starting new series with patch: 0"
-                    }
-                    
-                    env.FULL_VERSION = "${major}.${minor}.${patch}"
-                    env.IMAGE_TAG = env.FULL_VERSION
-                    currentBuild.displayName = env.FULL_VERSION
-                    
-                    echo "Version set to: ${env.FULL_VERSION}"
+                    prepareVersion()
                 }
             }
         }
@@ -362,6 +313,94 @@ pipeline {
 //---------------------------------
 // Pipeline Initialization & Setup
 //---------------------------------
+
+/**
+ * Prepares display name and docker image tag
+ */
+def prepareVersion() {
+    def major = params.MAJOR_VERSION
+    def minor = params.MINOR_VERSION
+    def repository = "zacst/learn-unit-test"
+
+    echo "Searching Docker Hub for latest patch of ${repository}:${major}.${minor}.x"
+
+    // Get Docker Hub tags with authentication for private repository
+    def responseData
+    withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+        
+        try {
+            // Step 1: Get authentication token
+            echo "Authenticating with Docker Hub..."
+            def tokenResponse = sh(
+                script: "curl -s \"https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repository}:pull\" -u \"${env.DOCKER_USER}:${env.DOCKER_PASS}\"",
+                returnStdout: true
+            ).trim()
+            
+            def tokenJson = readJSON text: tokenResponse
+            
+            if (!tokenJson.token) {
+                error("Failed to authenticate with Docker Hub. Check your credentials.")
+            }
+            
+            // Step 2: Fetch repository tags using Registry API v2
+            echo "Fetching tags for ${repository}..."
+            def tagsResponse = sh(
+                script: "curl -s -H \"Authorization: Bearer ${tokenJson.token}\" \"https://registry-1.docker.io/v2/${repository}/tags/list\"",
+                returnStdout: true
+            ).trim()
+            
+            def tagsJson = readJSON text: tagsResponse
+            
+            if (tagsJson.errors) {
+                error("Failed to fetch tags: ${tagsJson.errors}")
+            }
+            
+            // Convert tags array to other format
+            responseData = [
+                results: tagsJson.tags.collect { tagName -> 
+                    [name: tagName]
+                }
+            ]
+            
+        } catch (Exception e) {
+            error("Error accessing Docker repository: ${e.getMessage()}")
+        }
+    }
+    
+    int highestPatch = -1
+    def pattern = ~/(\d+)\.(\d+)\.(\d+)/
+
+    responseData.results.each { tag ->
+        def tagName = tag.name
+        def matcher = (tagName =~ pattern)
+        
+        if (matcher.matches()) {
+            def tagMajor = matcher[0][1]
+            def tagMinor = matcher[0][2]
+            def tagPatch = matcher[0][3].toInteger()
+
+            if (tagMajor == major && tagMinor == minor) {
+                if (tagPatch > highestPatch) {
+                    highestPatch = tagPatch
+                }
+            }
+        }
+    }
+
+    def patch = (highestPatch >= 0) ? highestPatch + 1 : 0
+    
+    if (highestPatch >= 0) {
+        echo "Found highest existing patch: ${highestPatch}. New patch will be: ${patch}"
+    } else {
+        echo "No existing tags found for ${major}.${minor}.*. Starting new series with patch: 0"
+    }
+    
+    env.FULL_VERSION = "${major}.${minor}.${patch}"
+    env.IMAGE_TAG = env.FULL_VERSION
+    currentBuild.displayName = env.FULL_VERSION
+    
+    echo "Version set to: ${env.FULL_VERSION}"
+}
 
 /**
  * Initializes build-wide variables.
